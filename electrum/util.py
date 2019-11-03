@@ -67,11 +67,11 @@ def inv_dict(d):
 ca_path = certifi.where()
 
 
-base_units = {'BTC':8, 'mBTC':5, 'bits':2, 'sat':0}
+base_units = {'BSTY':8, 'mBSTY':5, 'bits':2, 'sat':0}
 base_units_inverse = inv_dict(base_units)
-base_units_list = ['BTC', 'mBTC', 'bits', 'sat']  # list(dict) does not guarantee order
+base_units_list = ['BSTY', 'mBSTY', 'bits', 'sat']  # list(dict) does not guarantee order
 
-DECIMAL_POINT_DEFAULT = 5  # mBTC
+DECIMAL_POINT_DEFAULT = 5  # mBSTY
 
 # types of payment requests
 PR_TYPE_ONCHAIN = 0
@@ -689,6 +689,8 @@ def time_difference(distance_in_time, include_seconds):
         return "over %d years" % (round(distance_in_minutes / 525600))
 
 mainnet_block_explorers = {
+    'GlobalBoost Explorer': ('https://bstyexplorer.globalboost.info/', 
+                        {'tx': 'tx/', 'addr': 'address/'}),
     'Bitupper Explorer': ('https://bitupper.com/en/explorer/bitcoin/',
                         {'tx': 'transactions/', 'addr': 'addresses/'}),
     'Bitflyer.jp': ('https://chainflyer.bitflyer.jp/',
@@ -744,7 +746,7 @@ def block_explorer_info():
 
 def block_explorer(config: 'SimpleConfig') -> str:
     from . import constants
-    default_ = 'Blockstream.info'
+    default_ = 'GlobalBoost Explorer'
     be_key = config.get('block_explorer', default_)
     be = block_explorer_info().get(be_key)
     return be_key if be is not None else default_

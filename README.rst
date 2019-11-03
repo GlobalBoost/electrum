@@ -1,5 +1,5 @@
-Electrum - Lightweight Bitcoin client
-=====================================
+Electrum-BSTY - Lightweight GlobalBoost client
+==============================================
 
 ::
 
