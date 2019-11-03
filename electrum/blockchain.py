@@ -31,7 +31,7 @@ from . import constants
 from .util import bfh, bh2u
 from .simple_config import SimpleConfig
 from .logging import get_logger, Logger
-
+from yescrypt import getPoWHash
 
 _logger = get_logger(__name__)
 
@@ -75,7 +75,7 @@ def hash_header(header: dict) -> str:
         return '0' * 64
     if header.get('prev_block_hash') is None:
         header['prev_block_hash'] = '00'*32
-    return hash_raw_header(serialize_header(header))
+    return hash_encode(getPoWHash(bfh(serialize_header(header))))
 
 
 def hash_raw_header(header: str) -> str:
@@ -590,6 +590,7 @@ class Blockchain(Logger):
         try:
             self.verify_header(header, prev_hash, target)
         except BaseException as e:
+            print(e)
             return False
         return True
 
