@@ -3,7 +3,7 @@
 
 [Desktop Entry]
 Comment=Lightweight GlobalBoost Client
-Exec=sh -c "PATH=\"\\$HOME/.local/bin:\\$PATH\"; electrum %u"
+Exec=sh -c "PATH=\"\\$HOME/.local/bin:\\$PATH\"; electrum-bsty %u"
 GenericName[en_US]=GlobalBoost Wallet
 GenericName=GlobalBoost Wallet
 Icon=electrum
@@ -18,5 +18,5 @@ MimeType=x-scheme-handler/globalboost;
 Actions=Testnet;
 
 [Desktop Action Testnet]
-Exec=sh -c "PATH=\"\\$HOME/.local/bin:\\$PATH\"; electrum --testnet %u"
+Exec=sh -c "PATH=\"\\$HOME/.local/bin:\\$PATH\"; electrum-bsty --testnet %u"
 Name=Testnet mode

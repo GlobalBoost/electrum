@@ -26,7 +26,7 @@ with open('contrib/requirements/requirements-hw.txt') as f:
     requirements_hw = f.read().splitlines()
 
 # load version.py; needlessly complicated alternative to "imp.load_source":
-version_spec = importlib.util.spec_from_file_location('version', 'electrum/version.py')
+version_spec = importlib.util.spec_from_file_location('version', 'electrum_bsty/version.py')
 version_module = version = importlib.util.module_from_spec(version_spec)
 version_spec.loader.exec_module(version_module)
 
@@ -47,7 +47,7 @@ if platform.system() in ['Linux', 'FreeBSD', 'DragonFly']:
             usr_share = os.path.expanduser('~/.local/share')
     data_files += [
         (os.path.join(usr_share, 'applications/'), ['electrum-bsty.desktop']),
-        (os.path.join(usr_share, icons_dirname), ['electrum/gui/icons/electrum.png']),
+        (os.path.join(usr_share, icons_dirname), ['electrum_bsty/gui/icons/electrum.png']),
     ]
 
 extras_require = {
@@ -64,25 +64,25 @@ setup(
     install_requires=requirements,
     extras_require=extras_require,
     packages=[
-        'electrum',
-        'electrum.gui',
-        'electrum.gui.qt',
-        'electrum.plugins',
-    ] + [('electrum.plugins.'+pkg) for pkg in find_packages('electrum/plugins')],
+        'electrum_bsty',
+        'electrum_bsty.gui',
+        'electrum_bsty.gui.qt',
+        'electrum_bsty.plugins',
+    ] + [('electrum_bsty.plugins.'+pkg) for pkg in find_packages('electrum_bsty/plugins')],
     package_dir={
-        'electrum': 'electrum'
+        'electrum_bsty': 'electrum_bsty'
     },
     package_data={
         '': ['*.txt', '*.json', '*.ttf', '*.otf'],
-        'electrum': [
+        'electrum_bsty': [
             'wordlist/*.txt',
             'locale/*/LC_MESSAGES/electrum.mo',
         ],
-        'electrum.gui': [
+        'electrum_bsty.gui': [
             'icons/*',
         ],
     },
-    scripts=['electrum/electrum'],
+    scripts=['electrum_bsty/electrum-bsty'],
     data_files=data_files,
     description="Lightweight GlobalBoost Wallet",
     author="Thomas Voegtlin",

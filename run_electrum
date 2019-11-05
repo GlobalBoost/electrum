@@ -77,18 +77,18 @@ if not is_android:
     check_imports()
 
 
-from electrum.logging import get_logger, configure_logging
-from electrum import util
-from electrum import constants
-from electrum import SimpleConfig
-from electrum.wallet import Wallet
-from electrum.storage import WalletStorage, get_derivation_used_for_hw_device_encryption
-from electrum.util import print_msg, print_stderr, json_encode, json_decode, UserCancelled
-from electrum.util import InvalidPassword
-from electrum.commands import get_parser, known_commands, Commands, config_variables
-from electrum import daemon
-from electrum import keystore
-from electrum.util import create_and_start_event_loop
+from electrum_bsty.logging import get_logger, configure_logging
+from electrum_bsty import util
+from electrum_bsty import constants
+from electrum_bsty import SimpleConfig
+from electrum_bsty.wallet import Wallet
+from electrum_bsty.storage import WalletStorage, get_derivation_used_for_hw_device_encryption
+from electrum_bsty.util import print_msg, print_stderr, json_encode, json_decode, UserCancelled
+from electrum_bsty.util import InvalidPassword
+from electrum_bsty.commands import get_parser, known_commands, Commands, config_variables
+from electrum_bsty import daemon
+from electrum_bsty import keystore
+from electrum_bsty.util import create_and_start_event_loop
 
 _logger = get_logger(__name__)
 
@@ -243,7 +243,7 @@ async def run_offline_command(config, config_options, plugins):
 
 
 def init_plugins(config, gui_name):
-    from electrum.plugin import Plugins
+    from electrum_bsty.plugin import Plugins
     return Plugins(config, gui_name)
 
 def sys_exit(i):
