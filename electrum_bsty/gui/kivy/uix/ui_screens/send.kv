@@ -1,9 +1,9 @@
-#:import _ electrum.gui.kivy.i18n._
+#:import _ electrum_bsty.gui.kivy.i18n._
 #:import Factory kivy.factory.Factory
 #:import Decimal decimal.Decimal
 #:set btc_symbol chr(171)
 #:set mbtc_symbol chr(187)
-#:set font_light 'electrum/gui/kivy/data/fonts/Roboto-Condensed.ttf'
+#:set font_light 'electrum_bsty/gui/kivy/data/fonts/Roboto-Condensed.ttf'
 
 <PaymentLabel@Label>
     #color: .305, .309, .309, 1
@@ -81,7 +81,7 @@ SendScreen:
                 height: blue_bottom.item_height
                 spacing: '5dp'
                 Image:
-                    source: 'atlas://electrum/gui/kivy/theming/light/lightning' if root.is_lightning else 'atlas://electrum/gui/kivy/theming/light/globe'
+                    source: 'atlas://electrum_bsty/gui/kivy/theming/light/lightning' if root.is_lightning else 'atlas://electrum_bsty/gui/kivy/theming/light/globe'
                     size_hint: None, None
                     size: '22dp', '22dp'
                     pos_hint: {'center_y': .5}
@@ -99,7 +99,7 @@ SendScreen:
                 height: blue_bottom.item_height
                 spacing: '5dp'
                 Image:
-                    source: 'atlas://electrum/gui/kivy/theming/light/calculator'
+                    source: 'atlas://electrum_bsty/gui/kivy/theming/light/calculator'
                     opacity: 0.7
                     size_hint: None, None
                     size: '22dp', '22dp'
@@ -119,7 +119,7 @@ SendScreen:
                 height: blue_bottom.item_height
                 spacing: '5dp'
                 Image:
-                    source: 'atlas://electrum/gui/kivy/theming/light/pen'
+                    source: 'atlas://electrum_bsty/gui/kivy/theming/light/pen'
                     size_hint: None, None
                     size: '22dp', '22dp'
                     pos_hint: {'center_y': .5}
@@ -136,7 +136,7 @@ SendScreen:
                 height: blue_bottom.item_height
                 spacing: '5dp'
                 Image:
-                    source: 'atlas://electrum/gui/kivy/theming/light/star_big_inactive'
+                    source: 'atlas://electrum_bsty/gui/kivy/theming/light/star_big_inactive'
                     size_hint: None, None
                     size: '22dp', '22dp'
                     pos_hint: {'center_y': .5}
@@ -151,16 +151,16 @@ SendScreen:
             IconButton:
                 size_hint: 0.5, 1
                 on_release: s.parent.do_save()
-                icon: 'atlas://electrum/gui/kivy/theming/light/save'
+                icon: 'atlas://electrum_bsty/gui/kivy/theming/light/save'
             IconButton:
                 size_hint: 0.5, 1
-                icon: 'atlas://electrum/gui/kivy/theming/light/copy'
+                icon: 'atlas://electrum_bsty/gui/kivy/theming/light/copy'
                 on_release: s.parent.do_paste()
             IconButton:
                 id: qr
                 size_hint: 1, 1
                 on_release: Clock.schedule_once(lambda dt: app.scan_qr(on_complete=app.on_qr))
-                icon: 'atlas://electrum/gui/kivy/theming/light/camera'
+                icon: 'atlas://electrum_bsty/gui/kivy/theming/light/camera'
             Button:
                 text: _('Clear')
                 size_hint: 1, 1

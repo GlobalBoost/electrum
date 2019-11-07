@@ -42,7 +42,7 @@ Builder.load_string('''
                     on_release:
                         root.copy_to_clipboard()
                 IconButton:
-                    icon: 'atlas://electrum/gui/kivy/theming/light/share'
+                    icon: 'atlas://electrum_bsty/gui/kivy/theming/light/share'
                     size_hint: 0.6, None
                     height: '48dp'
                     on_release: s.parent.do_share()

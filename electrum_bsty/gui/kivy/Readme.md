@@ -24,7 +24,7 @@ folder.
 2. Build image
 
     ```
-    $ sudo docker build -t electrum-android-builder-img electrum/gui/kivy/tools
+    $ sudo docker build -t electrum-android-builder-img electrum_bsty/gui/kivy/tools
     ```
 
 3. Build locale files
@@ -102,7 +102,7 @@ adb logcat | grep -F "`adb shell ps | grep org.electrum.electrum | cut -c14-19`"
 ### Kivy can be run directly on Linux Desktop. How?
 Install Kivy.
 
-Build atlas: `(cd electrum/gui/kivy/; make theming)`
+Build atlas: `(cd electrum_bsty/gui/kivy/; make theming)`
 
 Run electrum with the `-g` switch: `electrum -g kivy`
 

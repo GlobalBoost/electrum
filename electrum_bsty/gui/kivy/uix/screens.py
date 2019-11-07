@@ -80,7 +80,7 @@ class CScreen(Factory.Screen):
 
     @profiler
     def load_screen(self):
-        self.screen = Builder.load_file('electrum/gui/kivy/uix/ui_screens/' + self.kvname + '.kv')
+        self.screen = Builder.load_file('electrum_bsty/gui/kivy/uix/ui_screens/' + self.kvname + '.kv')
         self.add_widget(self.screen)
         self.loaded = True
         self.update()
@@ -137,7 +137,7 @@ class HistoryScreen(CScreen):
             status = 0
             txpos = tx_item['txpos']
             status_str = 'unconfirmed' if timestamp is None else format_time(int(timestamp))
-            icon = "atlas://electrum/gui/kivy/theming/light/lightning"
+            icon = "atlas://electrum_bsty/gui/kivy/theming/light/lightning"
             message = tx_item['label']
             fee_msat = tx_item['fee_msat']
             fee = int(fee_msat/1000) if fee_msat else None
@@ -151,7 +151,7 @@ class HistoryScreen(CScreen):
                                         conf=tx_item['confirmations'],
                                         timestamp=tx_item['timestamp'])
             status, status_str = self.app.wallet.get_tx_status(tx_hash, tx_mined_info)
-            icon = "atlas://electrum/gui/kivy/theming/light/" + TX_ICONS[status]
+            icon = "atlas://electrum_bsty/gui/kivy/theming/light/" + TX_ICONS[status]
             message = tx_item['label'] or tx_hash
             fee = tx_item['fee_sat']
             fee_text = '' if fee is None else 'fee: %d sat'%fee

@@ -33,10 +33,10 @@ from kivy.metrics import inch
 from kivy.lang import Builder
 
 ## lazy imports for factory so that widgets can be used in kv
-#Factory.register('InstallWizard', module='electrum.gui.kivy.uix.dialogs.installwizard')
-#Factory.register('InfoBubble', module='electrum.gui.kivy.uix.dialogs')
-#Factory.register('OutputList', module='electrum.gui.kivy.uix.dialogs')
-#Factory.register('OutputItem', module='electrum.gui.kivy.uix.dialogs')
+#Factory.register('InstallWizard', module='electrum_bsty.gui.kivy.uix.dialogs.installwizard')
+#Factory.register('InfoBubble', module='electrum_bsty.gui.kivy.uix.dialogs')
+#Factory.register('OutputList', module='electrum_bsty.gui.kivy.uix.dialogs')
+#Factory.register('OutputItem', module='electrum_bsty.gui.kivy.uix.dialogs')
 
 from .uix.dialogs.installwizard import InstallWizard
 from .uix.dialogs import InfoBubble, crash_reporter
@@ -60,16 +60,16 @@ from kivy.uix.tabbedpanel import TabbedPanel
 from kivy.uix.label import Label
 from kivy.core.clipboard import Clipboard
 
-Factory.register('TabbedCarousel', module='electrum.gui.kivy.uix.screens')
+Factory.register('TabbedCarousel', module='electrum_bsty.gui.kivy.uix.screens')
 
 # Register fonts without this you won't be able to use bold/italic...
 # inside markup.
 from kivy.core.text import Label
 Label.register('Roboto',
-               'electrum/gui/kivy/data/fonts/Roboto.ttf',
-               'electrum/gui/kivy/data/fonts/Roboto.ttf',
-               'electrum/gui/kivy/data/fonts/Roboto-Bold.ttf',
-               'electrum/gui/kivy/data/fonts/Roboto-Bold.ttf')
+               'electrum_bsty/gui/kivy/data/fonts/Roboto.ttf',
+               'electrum_bsty/gui/kivy/data/fonts/Roboto.ttf',
+               'electrum_bsty/gui/kivy/data/fonts/Roboto-Bold.ttf',
+               'electrum_bsty/gui/kivy/data/fonts/Roboto-Bold.ttf')
 
 
 from electrum_bsty.util import (base_units, NoDynamicFeeEstimates, decimal_point_to_base_unit_name,
@@ -499,7 +499,7 @@ class ElectrumWindow(App):
         currentActivity.startActivity(it)
 
     def build(self):
-        return Builder.load_file('electrum/gui/kivy/main.kv')
+        return Builder.load_file('electrum_bsty/gui/kivy/main.kv')
 
     def _pause(self):
         if platform == 'android':
@@ -699,7 +699,7 @@ class ElectrumWindow(App):
             d = WalletDialog()
             d.open()
         elif name == 'status':
-            popup = Builder.load_file('electrum/gui/kivy/uix/ui_screens/'+name+'.kv')
+            popup = Builder.load_file('electrum_bsty/gui/kivy/uix/ui_screens/'+name+'.kv')
             master_public_keys_layout = popup.ids.master_public_keys
             for xpub in self.wallet.get_master_public_keys()[1:]:
                 master_public_keys_layout.add_widget(TopLabel(text=_('Master Public Key')))
@@ -711,7 +711,7 @@ class ElectrumWindow(App):
         elif name.endswith("_dialog"):
             getattr(self, name)()
         else:
-            popup = Builder.load_file('electrum/gui/kivy/uix/ui_screens/'+name+'.kv')
+            popup = Builder.load_file('electrum_bsty/gui/kivy/uix/ui_screens/'+name+'.kv')
             popup.open()
 
     @profiler
@@ -727,9 +727,9 @@ class ElectrumWindow(App):
 
         #setup lazy imports for mainscreen
         Factory.register('AnimatedPopup',
-                         module='electrum.gui.kivy.uix.dialogs')
+                         module='electrum_bsty.gui.kivy.uix.dialogs')
         Factory.register('QRCodeWidget',
-                         module='electrum.gui.kivy.uix.qrcodewidget')
+                         module='electrum_bsty.gui.kivy.uix.qrcodewidget')
 
         # preload widgets. Remove this if you want to load the widgets on demand
         #Cache.append('electrum_widgets', 'AnimatedPopup', Factory.AnimatedPopup())
@@ -745,7 +745,7 @@ class ElectrumWindow(App):
         self.receive_screen = None
         self.requests_screen = None
         self.address_screen = None
-        self.icon = "electrum/gui/icons/electrum.png"
+        self.icon = "electrum_bsty/gui/icons/electrum.png"
         self.tabs = self.root.ids['tabs']
 
     def update_interfaces(self, dt):
@@ -918,7 +918,7 @@ class ElectrumWindow(App):
         self.qr_dialog(label.name, label.data, True)
 
     def show_error(self, error, width='200dp', pos=None, arrow_pos=None,
-        exit=False, icon='atlas://electrum/gui/kivy/theming/light/error', duration=0,
+        exit=False, icon='atlas://electrum_bsty/gui/kivy/theming/light/error', duration=0,
         modal=False):
         ''' Show an error Message Bubble.
         '''
@@ -930,7 +930,7 @@ class ElectrumWindow(App):
         exit=False, duration=0, modal=False):
         ''' Show an Info Message Bubble.
         '''
-        self.show_error(error, icon='atlas://electrum/gui/kivy/theming/light/important',
+        self.show_error(error, icon='atlas://electrum_bsty/gui/kivy/theming/light/important',
             duration=duration, modal=modal, exit=exit, pos=pos,
             arrow_pos=arrow_pos)
 
@@ -970,7 +970,7 @@ class ElectrumWindow(App):
             info_bubble.show_arrow = False
             img.allow_stretch = True
             info_bubble.dim_background = True
-            info_bubble.background_image = 'atlas://electrum/gui/kivy/theming/light/card'
+            info_bubble.background_image = 'atlas://electrum_bsty/gui/kivy/theming/light/card'
         else:
             info_bubble.fs = False
             info_bubble.icon = icon

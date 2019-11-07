@@ -45,12 +45,12 @@ Builder.load_string('''
                     text: _('Delete')
                     on_release: root.delete_dialog()
                 IconButton:
-                    icon: 'atlas://electrum/gui/kivy/theming/light/copy'
+                    icon: 'atlas://electrum_bsty/gui/kivy/theming/light/copy'
                     size_hint: 0.5, None
                     height: '48dp'
                     on_release: root.copy_to_clipboard()
                 IconButton:
-                    icon: 'atlas://electrum/gui/kivy/theming/light/share'
+                    icon: 'atlas://electrum_bsty/gui/kivy/theming/light/share'
                     size_hint: 0.5, None
                     height: '48dp'
                     on_release: root.do_share()
