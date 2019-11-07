@@ -417,7 +417,7 @@ class ElectrumGui:
                         self.show_message("Error:" + server + "\nIn doubt, type \"auto-connect\"")
                         return False
             if out.get('server') or out.get('proxy'):
-                proxy = electrum.network.deserialize_proxy(out.get('proxy')) if out.get('proxy') else proxy_config
+                proxy = electrum_bsty.network.deserialize_proxy(out.get('proxy')) if out.get('proxy') else proxy_config
                 net_params = NetworkParameters(host, port, protocol, proxy, auto_connect)
                 self.network.run_from_another_thread(self.network.set_parameters(net_params))
 

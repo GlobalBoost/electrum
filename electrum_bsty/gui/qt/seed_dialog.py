@@ -150,7 +150,7 @@ class SeedLayout(QVBoxLayout):
 
     def initialize_completer(self):
         bip39_english_list = Mnemonic('en').wordlist
-        old_list = electrum.old_mnemonic.words
+        old_list = electrum_bsty.old_mnemonic.words
         only_old_list = set(old_list) - set(bip39_english_list)
         self.wordlist = bip39_english_list + list(only_old_list)  # concat both lists
         self.wordlist.sort()

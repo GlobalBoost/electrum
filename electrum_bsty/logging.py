@@ -40,15 +40,15 @@ class LogFormatterForConsole(logging.Formatter):
         return text
 
 
-# try to make console log lines short... no timestamp, short levelname, no "electrum."
+# try to make console log lines short... no timestamp, short levelname, no "electrum_bsty."
 console_formatter = LogFormatterForConsole(fmt="%(levelname).1s | %(name)s | %(message)s")
 
 
 def _shorten_name_of_logrecord(record: logging.LogRecord) -> logging.LogRecord:
     record = copy.copy(record)  # avoid mutating arg
     # strip the main module name from the logger name
-    if record.name.startswith("electrum."):
-        record.name = record.name[9:]
+    if record.name.startswith("electrum_bsty."):
+        record.name = record.name[15:]
     # manual map to shorten common module names
     record.name = record.name.replace("interface.Interface", "interface", 1)
     record.name = record.name.replace("network.Network", "network", 1)
@@ -69,7 +69,7 @@ console_stderr_handler.setLevel(logging.WARNING)
 root_logger.addHandler(console_stderr_handler)
 
 # creates a logger specifically for electrum library
-electrum_logger = logging.getLogger("electrum")
+electrum_logger = logging.getLogger("electrum_bsty")
 electrum_logger.setLevel(logging.DEBUG)
 
 
@@ -188,8 +188,8 @@ class ShortcutFilteringFilter(logging.Filter):
 # --- External API
 
 def get_logger(name: str) -> logging.Logger:
-    if name.startswith("electrum."):
-        name = name[9:]
+    if name.startswith("electrum_bsty."):
+        name = name[15:]
     return electrum_logger.getChild(name)
 
 

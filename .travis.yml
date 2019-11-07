@@ -35,10 +35,10 @@ jobs:
         - pip install -r contrib/requirements/requirements.txt
         - pip install electrumx
       before_script:
-          - electrum/tests/regtest/start_bitcoind.sh
-          - electrum/tests/regtest/start_electrumx.sh
+          - electrum_bsty/tests/regtest/start_bitcoind.sh
+          - electrum_bsty/tests/regtest/start_electrumx.sh
       script:
-        - python -m unittest electrum/tests/regtest.py
+        - python -m unittest electrum_bsty/tests/regtest.py
       after_success: True
     - name: "Flake8 linter tests"
       language: python
@@ -67,7 +67,7 @@ jobs:
       install:
         - pip install requests && ./contrib/pull_locale
         - ./contrib/make_packages
-        - sudo docker build --no-cache -t electrum-android-builder-img electrum/gui/kivy/tools
+        - sudo docker build --no-cache -t electrum-android-builder-img electrum_bsty/gui/kivy/tools
       script:
         - sudo chown -R 1000:1000 .
         # Output something every minute or Travis kills the job

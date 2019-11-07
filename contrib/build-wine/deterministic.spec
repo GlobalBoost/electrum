@@ -38,12 +38,12 @@ binaries += [b for b in collect_dynamic_libs('PyQt5') if 'qwindowsvista' in b[0]
 binaries += [('C:/tmp/libsecp256k1.dll', '.')]
 
 datas = [
-    (home+'electrum/*.json', 'electrum'),
-    (home+'electrum/wordlist/english.txt', 'electrum/wordlist'),
-    (home+'electrum/locale', 'electrum/locale'),
-    (home+'electrum/plugins', 'electrum/plugins'),
+    (home+'electrum_bsty/*.json', 'electrum_bsty'),
+    (home+'electrum_bsty/wordlist/english.txt', 'electrum_bsty/wordlist'),
+    (home+'electrum_bsty/locale', 'electrum_bsty/locale'),
+    (home+'electrum_bsty/plugins', 'electrum_bsty/plugins'),
     ('C:\\Program Files (x86)\\ZBar\\bin\\', '.'),
-    (home+'electrum/gui/icons', 'electrum/gui/icons'),
+    (home+'electrum_bsty/gui/icons', 'electrum_bsty/gui/icons'),
 ]
 datas += collect_data_files('trezorlib')
 datas += collect_data_files('safetlib')
@@ -55,22 +55,22 @@ datas += collect_data_files('jsonrpcclient')
 
 # We don't put these files in to actually include them in the script but to make the Analysis method scan them for imports
 a = Analysis([home+'run_electrum',
-              home+'electrum/gui/qt/main_window.py',
-              home+'electrum/gui/text.py',
-              home+'electrum/util.py',
-              home+'electrum/wallet.py',
-              home+'electrum/simple_config.py',
-              home+'electrum/bitcoin.py',
-              home+'electrum/dnssec.py',
-              home+'electrum/commands.py',
-              home+'electrum/plugins/cosigner_pool/qt.py',
-              home+'electrum/plugins/email_requests/qt.py',
-              home+'electrum/plugins/trezor/qt.py',
-              home+'electrum/plugins/safe_t/client.py',
-              home+'electrum/plugins/safe_t/qt.py',
-              home+'electrum/plugins/keepkey/qt.py',
-              home+'electrum/plugins/ledger/qt.py',
-              home+'electrum/plugins/coldcard/qt.py',
+              home+'electrum_bsty/gui/qt/main_window.py',
+              home+'electrum_bsty/gui/text.py',
+              home+'electrum_bsty/util.py',
+              home+'electrum_bsty/wallet.py',
+              home+'electrum_bsty/simple_config.py',
+              home+'electrum_bsty/bitcoin.py',
+              home+'electrum_bsty/dnssec.py',
+              home+'electrum_bsty/commands.py',
+              home+'electrum_bsty/plugins/cosigner_pool/qt.py',
+              home+'electrum_bsty/plugins/email_requests/qt.py',
+              home+'electrum_bsty/plugins/trezor/qt.py',
+              home+'electrum_bsty/plugins/safe_t/client.py',
+              home+'electrum_bsty/plugins/safe_t/qt.py',
+              home+'electrum_bsty/plugins/keepkey/qt.py',
+              home+'electrum_bsty/plugins/ledger/qt.py',
+              home+'electrum_bsty/plugins/coldcard/qt.py',
               #home+'packages/requests/utils.py'
               ],
              binaries=binaries,
@@ -122,7 +122,7 @@ exe_standalone = EXE(
     debug=False,
     strip=None,
     upx=False,
-    icon=home+'electrum/gui/icons/electrum.ico',
+    icon=home+'electrum_bsty/gui/icons/electrum.ico',
     console=False)
     # console=True makes an annoying black box pop up, but it does make Electrum output command line commands, with this turned off no output will be given but commands can still be used
 
@@ -135,7 +135,7 @@ exe_portable = EXE(
     debug=False,
     strip=None,
     upx=False,
-    icon=home+'electrum/gui/icons/electrum.ico',
+    icon=home+'electrum_bsty/gui/icons/electrum.ico',
     console=False)
 
 #####
@@ -149,7 +149,7 @@ exe_dependent = EXE(
     debug=False,
     strip=None,
     upx=False,
-    icon=home+'electrum/gui/icons/electrum.ico',
+    icon=home+'electrum_bsty/gui/icons/electrum.ico',
     console=False)
 
 coll = COLLECT(
@@ -160,6 +160,6 @@ coll = COLLECT(
     strip=None,
     upx=True,
     debug=False,
-    icon=home+'electrum/gui/icons/electrum.ico',
+    icon=home+'electrum_bsty/gui/icons/electrum.ico',
     console=False,
     name=os.path.join('dist', 'electrum'))

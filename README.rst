@@ -71,7 +71,7 @@ Run install (this should install dependencies)::
 Compile the protobuf description file::
 
     sudo apt-get install protobuf-compiler
-    protoc --proto_path=electrum --python_out=electrum electrum/paymentrequest.proto
+    protoc --proto_path=electrum_bsty --python_out=electrum_bsty electrum_bsty/paymentrequest.proto
 
 Create translations (optional)::
 
@@ -111,4 +111,4 @@ See :code:`contrib/build-wine/README.md`.
 Android
 -------
 
-See :code:`electrum/gui/kivy/Readme.md`.
+See :code:`electrum_bsty/gui/kivy/Readme.md`.

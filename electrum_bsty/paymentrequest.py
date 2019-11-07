@@ -36,7 +36,7 @@ import aiohttp
 try:
     from . import paymentrequest_pb2 as pb2
 except ImportError:
-    sys.exit("Error: could not find paymentrequest_pb2.py. Create it with 'protoc --proto_path=electrum/ --python_out=electrum/ electrum/paymentrequest.proto'")
+    sys.exit("Error: could not find paymentrequest_pb2.py. Create it with 'protoc --proto_path=electrum_bsty/ --python_out=electrum_bsty/ electrum_bsty/paymentrequest.proto'")
 
 from . import bitcoin, ecc, util, transaction, x509, rsakey
 from .util import bh2u, bfh, export_meta, import_meta, make_aiohttp_session
@@ -77,7 +77,7 @@ async def get_payment_request(url: str) -> 'PaymentRequest':
                 async with session.get(url) as response:
                     resp_content = await response.read()
                     response.raise_for_status()
-                    # Guard against `bitcoin:`-URIs with invalid payment request URLs
+                    # Guard against `globalboost:`-URIs with invalid payment request URLs
                     if "Content-Type" not in response.headers \
                     or response.headers["Content-Type"] != "application/bitcoin-paymentrequest":
                         data = None

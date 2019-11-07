@@ -32,7 +32,7 @@ if ! which msgfmt > /dev/null 2>&1; then
     fail "Please install gettext"
 fi
 for i in ./locale/*; do
-    dir=$WINEPREFIX/drive_c/electrum/electrum/$i/LC_MESSAGES
+    dir=$WINEPREFIX/drive_c/electrum/electrum_bsty/$i/LC_MESSAGES
     mkdir -p $dir
     msgfmt --output-file=$dir/electrum.mo $i/electrum.po || true
 done
