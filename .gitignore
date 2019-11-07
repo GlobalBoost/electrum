@@ -4,7 +4,7 @@
 build/
 dist/
 *.egg/
-Electrum-BSTY.egg-info/
+Electrum_BSTY.egg-info/
 electrum_bsty/locale/
 .devlocaltmp/
 *_trial_temp
