@@ -59,7 +59,7 @@ def deser_compact_size(f):
     return nit
 
 def my_var_int(l):
-    # Bitcoin serialization of integers... directly into binary!
+    # GlobalBoost serialization of integers... directly into binary!
     if l < 253:
         return pack("B", l)
     elif l < 0x10000:

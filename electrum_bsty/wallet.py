@@ -314,7 +314,7 @@ class Abstract_Wallet(AddressSynchronizer):
             addr = str(addrs[0])
             if not bitcoin.is_address(addr):
                 neutered_addr = addr[:5] + '..' + addr[-2:]
-                raise WalletFileException(f'The addresses in this wallet are not bitcoin addresses.\n'
+                raise WalletFileException(f'The addresses in this wallet are not globalboost addresses.\n'
                                           f'e.g. {neutered_addr} (length: {len(addr)})')
 
     def calc_unused_change_addresses(self):
@@ -404,7 +404,7 @@ class Abstract_Wallet(AddressSynchronizer):
         if self.is_watching_only():
             raise Exception(_("This is a watching-only wallet"))
         if not is_address(address):
-            raise Exception(f"Invalid bitcoin address: {address}")
+            raise Exception(f"Invalid globalboost address: {address}")
         if not self.is_mine(address):
             raise Exception(_('Address not in wallet.') + f' {address}')
         index = self.get_address_index(address)
@@ -865,7 +865,7 @@ class Abstract_Wallet(AddressSynchronizer):
                 addrs = self.get_change_addresses(slice_start=-self.gap_limit_for_change)
                 change_addrs = [random.choice(addrs)] if addrs else []
         for addr in change_addrs:
-            assert is_address(addr), f"not valid bitcoin address: {addr}"
+            assert is_address(addr), f"not valid globalboost address: {addr}"
             # note that change addresses are not necessarily ismine
             # in which case this is a no-op
             self.check_address(addr)
@@ -879,7 +879,7 @@ class Abstract_Wallet(AddressSynchronizer):
         for i, o in enumerate(outputs):
             if o.type == TYPE_ADDRESS:
                 if not is_address(o.address):
-                    raise Exception("Invalid bitcoin address: {}".format(o.address))
+                    raise Exception("Invalid globalboost address: {}".format(o.address))
             if o.value == '!':
                 if i_max is not None:
                     raise Exception("More than one output set to spend max")
@@ -1446,7 +1446,7 @@ class Abstract_Wallet(AddressSynchronizer):
         if req['type'] == PR_TYPE_ONCHAIN:
             addr = req['address']
             if not bitcoin.is_address(addr):
-                raise Exception(_('Invalid Bitcoin address.'))
+                raise Exception(_('Invalid GlobalBoost address.'))
             if not self.is_mine(addr):
                 raise Exception(_('Address not in wallet.'))
             key = addr
@@ -1584,7 +1584,7 @@ class Abstract_Wallet(AddressSynchronizer):
         return None
 
     def price_at_timestamp(self, txid, price_func):
-        """Returns fiat price of bitcoin at the time tx got confirmed."""
+        """Returns fiat price of globalboost at the time tx got confirmed."""
         timestamp = self.get_tx_height(txid).timestamp
         return price_func(timestamp if timestamp else time.time())
 
@@ -2215,8 +2215,8 @@ def restore_wallet_from_text(text, *, path, config: SimpleConfig,
                              passphrase=None, password=None, encrypt_file=True,
                              gap_limit=None) -> dict:
     """Restore a wallet from text. Text can be a seed phrase, a master
-    public key, a master private key, a list of bitcoin addresses
-    or bitcoin private keys."""
+    public key, a master private key, a list of globalboost addresses
+    or globalboost private keys."""
     storage = WalletStorage(path)
     if storage.file_exists():
         raise Exception("Remove the existing wallet first!")

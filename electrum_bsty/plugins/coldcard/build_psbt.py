@@ -116,7 +116,7 @@ def deser_compact_size(f):
     return nit
 
 def my_var_int(l):
-    # Bitcoin serialization of integers... directly into binary!
+    # GlobalBoost serialization of integers... directly into binary!
     if l < 253:
         return pack("B", l)
     elif l < 0x10000:
@@ -332,7 +332,7 @@ def recover_tx_from_psbt(first: BasicPSBT, wallet: Abstract_Wallet) -> Transacti
     tx.deserialize(force_full_parse=True)
 
     # .. add back some data that's been preserved in the PSBT, but isn't part of
-    # of the unsigned bitcoin txn
+    # of the unsigned globalboost txn
     tx.is_partial_originally = True
 
     for idx, inp in enumerate(tx.inputs()):

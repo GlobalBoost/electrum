@@ -20,7 +20,7 @@ from . import ecc
 # A writer MUST encode `amount` as a positive decimal integer with no
 # leading zeroes, SHOULD use the shortest representation possible.
 def shorten_amount(amount):
-    """ Given an amount in bitcoin, shorten it
+    """ Given an amount in globalboost, shorten it
     """
     # Convert to pico initially
     amount = int(amount * 10**12)
