@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, coll
 import sys, os
 
 PACKAGE='Electrum'
-PYPKG='electrum'
+PYPKG='electrum_bsty'
 MAIN_SCRIPT='run_electrum'
 ICONS_FILE=PYPKG + '/gui/icons/electrum-bsty.icns'
 APP_SIGN = os.environ.get('APP_SIGN', '')
