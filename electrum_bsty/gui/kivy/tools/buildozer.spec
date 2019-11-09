@@ -7,7 +7,7 @@ title = Electrum
 package.name = Electrum
 
 # (str) Package domain (needed for android/ios packaging)
-package.domain = org.electrum
+package.domain = com.globalboost.apps
 
 # (str) Source code where the main.py live
 source.dir = .
@@ -185,7 +185,7 @@ p4a.source_dir = /opt/python-for-android
 [buildozer]
 
 # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
-log_level = 1
+log_level = 2
 
 
 # -----------------------------------------------------------------------------
