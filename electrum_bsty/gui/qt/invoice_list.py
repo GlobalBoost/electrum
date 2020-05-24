@@ -85,7 +85,7 @@ class InvoiceList(MyTreeView):
         else:
             return
         status_item = model.item(row, self.Columns.STATUS)
-        status_str = get_request_status(req)
+        status, status_str = get_request_status(req)
         if log:
             self.logs[key] = log
             if status == PR_INFLIGHT:
@@ -95,8 +95,6 @@ class InvoiceList(MyTreeView):
 
     def update(self):
         _list = self.parent.wallet.get_invoices()
-        # filter out paid invoices unless we have the log
-        _list = [x for x in _list if x and x.get('status') != PR_PAID or x.get('rhash') in self.logs]
         self.model().clear()
         self.update_headers(self.__class__.headers)
         for idx, item in enumerate(_list):
@@ -111,8 +109,7 @@ class InvoiceList(MyTreeView):
                     icon_name = 'seal.png'
             else:
                 raise Exception('Unsupported type')
-            status = item['status']
-            status_str = get_request_status(item) # convert to str
+            status, status_str = get_request_status(item) # convert to str
             message = item['message']
             amount = item['amount']
             timestamp = item.get('time', 0)
