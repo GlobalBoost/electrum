@@ -1,16 +1,4 @@
 {
-    "Bitbank": [
-        "JPY"
-    ],
-    "Bitso": [
-        "MXN"
-    ],
-    "Bitvalor": [
-        "BRL"
-    ],
-    "Bylls": [
-        "CAD"
-    ],
     "CoinCodex": [
         "USD"
     ],
@@ -70,11 +58,5 @@
         "XLM",
         "XRP",
         "ZAR"
-    ],
-    "TheRockTrading": [
-        "EUR"
-    ],
-    "Zaif": [
-        "JPY"
     ]
 }

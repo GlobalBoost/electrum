@@ -22,8 +22,8 @@ from .logging import Logger
 
 
 DEFAULT_ENABLED = False
-DEFAULT_CURRENCY = "EUR"
-DEFAULT_EXCHANGE = "CoinGecko"  # default exchange should ideally provide historical rates
+DEFAULT_CURRENCY = "USD"
+DEFAULT_EXCHANGE = "CoinCodex"  # default exchange should ideally provide historical rates
 
 
 # See https://en.wikipedia.org/wiki/ISO_4217
@@ -145,48 +145,6 @@ class ExchangeBase(Logger):
         return sorted([str(a) for (a, b) in rates.items() if b is not None and len(a)==3])
 
 
-class Bitcointoyou(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('bitcointoyou.com', "/API/ticker.aspx")
-        return {'BRL': Decimal(json['ticker']['last'])}
-
-
-class Bitbank(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('public.bitbank.cc', '/btc_jpy/ticker')
-        return {'JPY': Decimal(json['data']['last'])}
-
-
-class BitFlyer(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('bitflyer.jp', '/api/echo/price')
-        return {'JPY': Decimal(json['mid'])}
-
-
-class Bitso(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('api.bitso.com', '/v2/ticker')
-        return {'MXN': Decimal(json['last'])}
-
-
-class Bitvalor(ExchangeBase):
-
-    async def get_rates(self,ccy):
-        json = await self.get_json('api.bitvalor.com', '/v1/ticker.json')
-        return {'BRL': Decimal(json['ticker_1h']['total']['last'])}
-
-
-class Bylls(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('bylls.com', '/api/price?from_currency=BTC&to_currency=CAD')
-        return {'CAD': Decimal(json['public_price']['to_price'])}
-
-
 class CoinGecko(ExchangeBase):
 
     async def get_rates(self, ccy):
@@ -205,6 +163,7 @@ class CoinGecko(ExchangeBase):
         return dict([(datetime.utcfromtimestamp(h[0]/1000).strftime('%Y-%m-%d'), h[1])
                      for h in history['prices']])
 
+
 class CoinCodex(ExchangeBase):
 
     async def get_rates(self, ccy):
@@ -220,61 +179,6 @@ class CoinCodex(ExchangeBase):
                                       '/api/coincodex/get_coin_history/bsty/2012-07-22/%s/1' % now)
         return dict([(datetime.utcfromtimestamp(h[0]).strftime('%Y-%m-%d'), h[1])
                      for h in history['BSTY']])
-
-
-class itBit(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        ccys = ['USD', 'EUR', 'SGD']
-        json = await self.get_json('api.itbit.com', '/v1/markets/XBT%s/ticker' % ccy)
-        result = dict.fromkeys(ccys)
-        if ccy in ccys:
-            result[ccy] = Decimal(json['lastPrice'])
-        return result
-
-
-class MercadoBitcoin(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('api.bitvalor.com', '/v1/ticker.json')
-        return {'BRL': Decimal(json['ticker_1h']['exchanges']['MBT']['last'])}
-
-
-class NegocieCoins(ExchangeBase):
-
-    async def get_rates(self,ccy):
-        json = await self.get_json('api.bitvalor.com', '/v1/ticker.json')
-        return {'BRL': Decimal(json['ticker_1h']['exchanges']['NEG']['last'])}
-
-class TheRockTrading(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('api.therocktrading.com',
-                             '/v1/funds/BTCEUR/ticker')
-        return {'EUR': Decimal(json['last'])}
-
-
-class Winkdex(ExchangeBase):
-
-    async def get_rates(self, ccy):
-        json = await self.get_json('winkdex.com', '/api/v0/price')
-        return {'USD': Decimal(json['price'] / 100.0)}
-
-    def history_ccys(self):
-        return ['USD']
-
-    async def request_history(self, ccy):
-        json = await self.get_json('winkdex.com',
-                             "/api/v0/series?start_time=1342915200")
-        history = json['series'][0]['results']
-        return dict([(h['timestamp'][:10], h['price'] / 100.0)
-                     for h in history])
-
-
-class Zaif(ExchangeBase):
-    async def get_rates(self, ccy):
-        json = await self.get_json('api.zaif.jp', '/api/1/last_price/btc_jpy')
-        return {'JPY': Decimal(json['last_price'])}
 
 
 def dictinvert(d):
