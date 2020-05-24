@@ -5,8 +5,14 @@
     "Bitso": [
         "MXN"
     ],
+    "Bitvalor": [
+        "BRL"
+    ],
     "Bylls": [
         "CAD"
+    ],
+    "CoinCodex": [
+        "USD"
     ],
     "CoinGecko": [
         "AED",
@@ -64,9 +70,6 @@
         "XLM",
         "XRP",
         "ZAR"
-    ],
-    "MercadoBitcoin": [
-        "BRL"
     ],
     "TheRockTrading": [
         "EUR"

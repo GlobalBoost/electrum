@@ -205,6 +205,22 @@ class CoinGecko(ExchangeBase):
         return dict([(datetime.utcfromtimestamp(h[0]/1000).strftime('%Y-%m-%d'), h[1])
                      for h in history['prices']])
 
+class CoinCodex(ExchangeBase):
+
+    async def get_rates(self, ccy):
+        json = await self.get_json('coincodex.com', '/api/coincodex/get_coin/bsty')
+        return {"USD": json["last_price_usd"]}
+
+    def history_ccys(self):
+        return ["USD"]
+
+    async def request_history(self, ccy):
+        now = datetime.now().strftime("%Y-%m-%d")
+        history = await self.get_json('coincodex.com',
+                                      '/api/coincodex/get_coin_history/bsty/2012-07-22/%s/1' % now)
+        return dict([(datetime.utcfromtimestamp(h[0]).strftime('%Y-%m-%d'), h[1])
+                     for h in history['BSTY']])
+
 
 class itBit(ExchangeBase):
 
