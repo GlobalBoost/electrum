@@ -46,8 +46,8 @@ if platform.system() in ['Linux', 'FreeBSD', 'DragonFly']:
         else:
             usr_share = os.path.expanduser('~/.local/share')
     data_files += [
-        (os.path.join(usr_share, 'applications/'), ['electrum.desktop']),
-        (os.path.join(usr_share, icons_dirname), ['electrum/gui/icons/electrum.png']),
+        (os.path.join(usr_share, 'applications/'), ['electrum-bsty.desktop']),
+        (os.path.join(usr_share, icons_dirname), ['electrum/gui/icons/electrum-bsty.png']),
     ]
 
 extras_require = {
@@ -65,37 +65,37 @@ extras_require['fast'] = extras_require['crypto']
 
 
 setup(
-    name="Electrum",
+    name="Electrum-BSTY",
     version=version.ELECTRUM_VERSION,
     python_requires='>={}'.format(MIN_PYTHON_VERSION),
     install_requires=requirements,
     extras_require=extras_require,
     packages=[
-        'electrum',
-        'electrum.gui',
-        'electrum.gui.qt',
-        'electrum.plugins',
-    ] + [('electrum.plugins.'+pkg) for pkg in find_packages('electrum/plugins')],
+        'electrum_bsty',
+        'electrum_bsty.gui',
+        'electrum_bsty.gui.qt',
+        'electrum_bsty.plugins',
+    ] + [('electrum_bsty.plugins.'+pkg) for pkg in find_packages('electrum/plugins')],
     package_dir={
-        'electrum': 'electrum'
+        'electrum_bsty': 'electrum'
     },
     package_data={
         '': ['*.txt', '*.json', '*.ttf', '*.otf', '*.csv'],
-        'electrum': [
+        'electrum_bsty': [
             'wordlist/*.txt',
             'locale/*/LC_MESSAGES/electrum.mo',
             'lnwire/*.csv',
         ],
-        'electrum.gui': [
+        'electrum_bsty.gui': [
             'icons/*',
         ],
     },
-    scripts=['electrum/electrum'],
+    scripts=['electrum/electrum-bsty'],
     data_files=data_files,
-    description="Lightweight Bitcoin Wallet",
+    description="Lightweight GlobalBoost Wallet",
     author="Thomas Voegtlin",
     author_email="thomasv@electrum.org",
     license="MIT Licence",
     url="https://electrum.org",
-    long_description="""Lightweight Bitcoin Wallet""",
+    long_description="""Lightweight GlobalBoost Wallet""",
 )

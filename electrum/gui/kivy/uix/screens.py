@@ -286,7 +286,7 @@ class SendScreen(CScreen):
     def read_invoice(self):
         address = str(self.address)
         if not address:
-            self.app.show_error(_('Recipient not specified.') + ' ' + _('Please scan a Bitcoin address or a payment request'))
+            self.app.show_error(_('Recipient not specified.') + ' ' + _('Please scan a Globalboost address or a payment request'))
             return
         if not self.amount:
             self.app.show_error(_('Please enter an amount'))
@@ -304,7 +304,7 @@ class SendScreen(CScreen):
                 outputs = self.payment_request.get_outputs()
             else:
                 if not bitcoin.is_address(address):
-                    self.app.show_error(_('Invalid Bitcoin Address') + ':\n' + address)
+                    self.app.show_error(_('Invalid Globalboost Address') + ':\n' + address)
                     return
                 outputs = [PartialTxOutput.from_address_and_value(address, amount)]
             return self.app.wallet.create_invoice(

@@ -202,7 +202,7 @@ class ElectrumWindow(App):
 
     def on_new_intent(self, intent):
         data = str(intent.getDataString())
-        if str(intent.getScheme()).lower() in ('bitcoin', 'lightning'):
+        if str(intent.getScheme()).lower() in ('globalboost', 'lightning'):
             self._process_invoice_str(data)
 
     _invoice_intent_queued = None  # type: Optional[str]
@@ -214,7 +214,7 @@ class ElectrumWindow(App):
             self.switch_to('send')
             self._invoice_intent_queued = invoice
             return
-        if invoice.lower().startswith('bitcoin:'):
+        if invoice.lower().startswith('globalboost:'):
             self.set_URI(invoice)
         elif invoice.lower().startswith('lightning:'):
             self.set_ln_invoice(invoice)
@@ -432,7 +432,7 @@ class ElectrumWindow(App):
         if is_address(data):
             self.set_URI(data)
             return
-        if data.startswith('bitcoin:'):
+        if data.startswith('globalboost:'):
             self.set_URI(data)
             return
         if data.startswith('channel_backup:'):
@@ -581,7 +581,7 @@ class ElectrumWindow(App):
         self.fiat_unit = self.fx.ccy if self.fx.is_enabled() else ''
         # default tab
         self.switch_to('history')
-        # bind intent for bitcoin: URI scheme
+        # bind intent for globalboost: URI scheme
         if platform == 'android':
             from android import activity
             from jnius import autoclass
@@ -813,7 +813,7 @@ class ElectrumWindow(App):
         self.receive_screen = None
         self.requests_screen = None
         self.address_screen = None
-        self.icon = "electrum/gui/icons/electrum.png"
+        self.icon = "electrum/gui/icons/electrum-bsty.png"
         self.tabs = self.root.ids['tabs']
 
     def update_interfaces(self, dt):
