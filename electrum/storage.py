@@ -78,8 +78,7 @@ class WalletStorage(Logger):
     def read(self):
         return self.decrypted if self.is_encrypted() else self.raw
 
-    @profiler
-    def write(self, data):
+    def write(self, data: str) -> None:
         s = self.encrypt_before_writing(data)
         temp_path = "%s.tmp.%s" % (self.path, os.getpid())
         with open(temp_path, "w", encoding='utf-8') as f:
@@ -87,7 +86,11 @@ class WalletStorage(Logger):
             f.flush()
             os.fsync(f.fileno())
 
-        mode = os.stat(self.path).st_mode if self.file_exists() else stat.S_IREAD | stat.S_IWRITE
+        try:
+            mode = os.stat(self.path).st_mode
+        except FileNotFoundError:
+            mode = stat.S_IREAD | stat.S_IWRITE
+
         # assert that wallet file does not exist, to prevent wallet corruption (see issue #5082)
         if not self.file_exists():
             assert not os.path.exists(self.path)
@@ -173,7 +176,7 @@ class WalletStorage(Logger):
         s = plaintext
         if self.pubkey:
             s = bytes(s, 'utf8')
-            c = zlib.compress(s)
+            c = zlib.compress(s, level=zlib.Z_BEST_SPEED)
             enc_magic = self._get_encryption_magic()
             public_key = ecc.ECPubkey(bfh(self.pubkey))
             s = public_key.encrypt_message(c, enc_magic)

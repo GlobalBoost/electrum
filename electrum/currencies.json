@@ -37,6 +37,7 @@
         "MMK",
         "MXN",
         "MYR",
+        "NGN",
         "NOK",
         "NZD",
         "PHP",
@@ -60,5 +61,8 @@
         "XRP",
         "YFI",
         "ZAR"
+    ],
+    "Walltime": [
+        "BRL"
     ]
 }

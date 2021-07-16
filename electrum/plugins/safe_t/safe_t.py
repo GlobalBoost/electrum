@@ -51,7 +51,7 @@ class SafeTKeyStore(Hardware_KeyStore):
         prev_tx = {}
         for txin in tx.inputs():
             tx_hash = txin.prevout.txid.hex()
-            if txin.utxo is None and not Transaction.is_segwit_input(txin):
+            if txin.utxo is None and not txin.is_segwit():
                 raise UserFacingException(_('Missing previous tx for legacy input.'))
             prev_tx[tx_hash] = txin.utxo
 
@@ -278,9 +278,9 @@ class SafeTPlugin(HW_PluginBase):
             return self.types.InputScriptType.SPENDWITNESS
         if electrum_txin_type in ('p2wpkh-p2sh', 'p2wsh-p2sh'):
             return self.types.InputScriptType.SPENDP2SHWITNESS
-        if electrum_txin_type in ('p2pkh', ):
+        if electrum_txin_type in ('p2pkh',):
             return self.types.InputScriptType.SPENDADDRESS
-        if electrum_txin_type in ('p2sh', ):
+        if electrum_txin_type in ('p2sh',):
             return self.types.InputScriptType.SPENDMULTISIG
         raise ValueError('unexpected txin type: {}'.format(electrum_txin_type))
 
@@ -289,9 +289,9 @@ class SafeTPlugin(HW_PluginBase):
             return self.types.OutputScriptType.PAYTOWITNESS
         if electrum_txin_type in ('p2wpkh-p2sh', 'p2wsh-p2sh'):
             return self.types.OutputScriptType.PAYTOP2SHWITNESS
-        if electrum_txin_type in ('p2pkh', ):
+        if electrum_txin_type in ('p2pkh',):
             return self.types.OutputScriptType.PAYTOADDRESS
-        if electrum_txin_type in ('p2sh', ):
+        if electrum_txin_type in ('p2sh',):
             return self.types.OutputScriptType.PAYTOMULTISIG
         raise ValueError('unexpected txin type: {}'.format(electrum_txin_type))
 

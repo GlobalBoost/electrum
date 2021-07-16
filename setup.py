@@ -53,8 +53,8 @@ if platform.system() in ['Linux', 'FreeBSD', 'DragonFly']:
 extras_require = {
     'hardware': requirements_hw,
     'gui': ['pyqt5'],
-    'crypto': ['cryptography>=2.1'],
-    'tests': ['pycryptodomex>=3.7', 'cryptography>=2.1', 'pyaes>=0.1a1'],
+    'crypto': ['cryptography>=2.6'],
+    'tests': ['pycryptodomex>=3.7', 'cryptography>=2.6', 'pyaes>=0.1a1'],
 }
 # 'full' extra that tries to grab everything an enduser would need (except for libsecp256k1...)
 extras_require['full'] = [pkg for sublist in
@@ -72,24 +72,20 @@ setup(
     extras_require=extras_require,
     packages=[
         'electrum_bsty',
+        'electrum_bsty.qrreader',
         'electrum_bsty.gui',
         'electrum_bsty.gui.qt',
+        'electrum_bsty.gui.qt.qrreader',
+        'electrum_bsty.gui.qt.qrreader.qtmultimedia',
         'electrum_bsty.plugins',
     ] + [('electrum_bsty.plugins.'+pkg) for pkg in find_packages('electrum/plugins')],
     package_dir={
         'electrum_bsty': 'electrum'
     },
-    package_data={
-        '': ['*.txt', '*.json', '*.ttf', '*.otf', '*.csv'],
-        'electrum_bsty': [
-            'wordlist/*.txt',
-            'locale/*/LC_MESSAGES/electrum.mo',
-            'lnwire/*.csv',
-        ],
-        'electrum_bsty.gui': [
-            'icons/*',
-        ],
-    },
+    # Note: MANIFEST.in lists what gets included in the tar.gz, and the
+    # package_data kwarg lists what gets put in site-packages when pip installing the tar.gz.
+    # By specifying include_package_data=True, MANIFEST.in becomes responsible for both.
+    include_package_data=True,
     scripts=['electrum/electrum-bsty'],
     data_files=data_files,
     description="Lightweight GlobalBoost Wallet",

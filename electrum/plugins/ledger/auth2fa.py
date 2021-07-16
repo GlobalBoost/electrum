@@ -1,4 +1,5 @@
 import copy
+from typing import TYPE_CHECKING
 
 from PyQt5.QtWidgets import (QDialog, QLineEdit, QTextEdit, QVBoxLayout, QLabel,
                              QWidget, QHBoxLayout, QComboBox)
@@ -11,6 +12,9 @@ from electrum.i18n import _
 from electrum import constants, bitcoin
 from electrum.logging import get_logger
 
+if TYPE_CHECKING:
+    from .ledger import Ledger_Client
+
 
 _logger = get_logger(__name__)
 
@@ -22,12 +26,12 @@ helpTxt = [_("Your Ledger Wallet wants to tell you a one-time PIN code.<br><br>"
             "put your cursor into it, and plug your device into that computer. " \
             "It will output a summary of the transaction being signed and a one-time PIN.<br><br>" \
             "Verify the transaction summary and type the PIN code here.<br><br>" \
-            "Before pressing enter, plug the device back into this computer.<br>" ),
+            "Before pressing enter, plug the device back into this computer.<br>"),
         _("Verify the address below.<br>Type the character from your security card corresponding to the <u><b>BOLD</b></u> character."),
         ]
 
 class LedgerAuthDialog(QDialog):
-    def __init__(self, handler, data):
+    def __init__(self, handler, data, *, client: 'Ledger_Client'):
         '''Ask user for 2nd factor authentication. Support text and security card methods.
         Use last method from settings, but support downgrade.
         '''
@@ -38,7 +42,7 @@ class LedgerAuthDialog(QDialog):
         self.setMinimumWidth(650)
         self.setWindowTitle(_("Ledger Wallet Authentication"))
         self.cfg = copy.deepcopy(self.handler.win.wallet.get_keystore().cfg)
-        self.dongle = self.handler.win.wallet.get_keystore().get_client().dongle
+        self.dongle = client.dongleObject.dongle
         self.pin = ''
         
         self.devmode = self.getDevice2FAMode()
@@ -157,7 +161,7 @@ class LedgerAuthDialog(QDialog):
     def getDevice2FAMode(self):
         apdu = [0xe0, 0x24, 0x01, 0x00, 0x00, 0x01] # get 2fa mode
         try:
-            mode = self.dongle.exchange( bytearray(apdu) )
+            mode = self.dongle.exchange(bytearray(apdu))
             return mode
         except BTChipException as e:
             _logger.debug('Device getMode Failed')

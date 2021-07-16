@@ -36,6 +36,9 @@ class TestLightning(unittest.TestCase):
 class TestLightningAB(TestLightning):
     agents = ['alice', 'bob']
 
+    def test_backup(self):
+        self.run_shell(['backup'])
+
     def test_breach(self):
         self.run_shell(['breach'])
 
@@ -54,9 +57,6 @@ class TestLightningAB(TestLightning):
 
 class TestLightningABC(TestLightning):
     agents = ['alice', 'bob', 'carol']
-
-    def test_forwarding(self):
-        self.run_shell(['forwarding'])
 
     def test_watchtower(self):
         self.run_shell(['watchtower'])
