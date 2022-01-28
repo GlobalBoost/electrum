@@ -3,7 +3,7 @@
 set -e
 
 # Parameterize
-PYTHON_VERSION=3.7.9
+PYTHON_VERSION=3.9.7
 BUILDDIR=/tmp/electrum-build
 PACKAGE=Electrum
 GIT_REPO=https://github.com/GlobalBoost/electrum
@@ -32,8 +32,10 @@ which xcodebuild > /dev/null 2>&1 || fail "Please install xcode command line too
 if [ -n "$CODESIGN_CERT" ]; then
     # Test the identity is valid for signing by doing this hack. There is no other way to do this.
     cp -f /bin/ls ./CODESIGN_TEST
+    set +e
     codesign -s "$CODESIGN_CERT" --dryrun -f ./CODESIGN_TEST > /dev/null 2>&1
     res=$?
+    set -e
     rm -f ./CODESIGN_TEST
     if ((res)); then
         fail "Code signing identity \"$CODESIGN_CERT\" appears to be invalid."
@@ -70,7 +72,7 @@ PKG_FILE="python-${PYTHON_VERSION}-macosx10.9.pkg"
 if [ ! -f "$CACHEDIR/$PKG_FILE" ]; then
     curl -o "$CACHEDIR/$PKG_FILE" "https://www.python.org/ftp/python/${PYTHON_VERSION}/$PKG_FILE"
 fi
-echo "bf54a14eef23467991e8c7a88c7307762e484c024a94ec1ee292ac1db3d41fc9  $CACHEDIR/$PKG_FILE" | shasum -a 256 -c \
+echo "f40f7407d20f88a6a64678b6586853de16cc5d7d07c82a8a2a7e43bba59dbae5  $CACHEDIR/$PKG_FILE" | shasum -a 256 -c \
      || fail "python pkg checksum mismatched"
 sudo installer -pkg "$CACHEDIR/$PKG_FILE" -target / \
     || fail "failed to install python"
@@ -127,16 +129,28 @@ info "generating locale"
 info "Installing some build-time deps for compilation..."
 brew install autoconf automake libtool gettext coreutils pkgconfig
 
-info "Building libsecp256k1 dylib..."
-"$CONTRIB"/make_libsecp256k1.sh || fail "Could not build libsecp"
+if [ ! -f "$PROJECT_ROOT"/electrum/libsecp256k1.0.dylib ]; then
+    info "Building libsecp256k1 dylib..."
+    "$CONTRIB"/make_libsecp256k1.sh || fail "Could not build libsecp"
+else
+    info "Skipping libsecp256k1 build: reusing already built dylib."
+fi
 cp "$PROJECT_ROOT"/electrum/libsecp256k1.0.dylib "$CONTRIB"/osx
 
-info "Building ZBar dylib..."
-"$CONTRIB"/make_zbar.sh || fail "Could not build ZBar dylib"
+if [ ! -f "$PROJECT_ROOT"/electrum/libzbar.0.dylib ]; then
+    info "Building ZBar dylib..."
+    "$CONTRIB"/make_zbar.sh || fail "Could not build ZBar dylib"
+else
+    info "Skipping ZBar build: reusing already built dylib."
+fi
 cp "$PROJECT_ROOT"/electrum/libzbar.0.dylib "$CONTRIB"/osx
 
-info "Building libusb dylib..."
-"$CONTRIB"/make_libusb.sh || fail "Could not build libusb dylib"
+if [ ! -f "$PROJECT_ROOT"/electrum/libusb-1.0.dylib ]; then
+    info "Building libusb dylib..."
+    "$CONTRIB"/make_libusb.sh || fail "Could not build libusb dylib"
+else
+    info "Skipping libusb build: reusing already built dylib."
+fi
 cp "$PROJECT_ROOT"/electrum/libusb-1.0.dylib "$CONTRIB"/osx
 
 
@@ -161,11 +175,11 @@ find . -exec touch -t '200101220000' {} + || true
 VERSION=`git describe --tags --dirty --always`
 
 info "Building binary"
-APP_SIGN="$CODESIGN_CERT" pyinstaller --noconfirm --ascii --clean --name $VERSION contrib/osx/osx.spec || fail "Could not build binary"
+pyinstaller --noconfirm --ascii --clean --name $VERSION contrib/osx/osx.spec || fail "Could not build binary"
 
 info "Adding globalboost URI types to Info.plist"
 plutil -insert 'CFBundleURLTypes' \
-	-xml '<array><dict> <key>CFBundleURLName</key> <string>globalboost</string> <key>CFBundleURLSchemes</key> <array><string>globalboost</string></array> </dict></array>' \
+	-xml '<array><dict> <key>CFBundleURLName</key> <string>globalboost</string> <key>CFBundleURLSchemes</key> <array><string>globalboost</string><string>lightning</string></array> </dict></array>' \
 	-- dist/$PACKAGE.app/Contents/Info.plist \
 	|| fail "Could not add keys to Info.plist. Make sure the program 'plutil' exists and is installed."
 

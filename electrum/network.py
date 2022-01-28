@@ -907,27 +907,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         # server_msg is untrusted input so it should not be shown to the user. see #4968
         server_msg = str(server_msg)
         server_msg = server_msg.replace("\n", r"\n")
-        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/policy/policy.cpp
-        # grep "reason ="
-        policy_error_messages = {
-            r"version": _("Transaction uses non-standard version."),
-            r"tx-size": _("The transaction was rejected because it is too large (in bytes)."),
-            r"scriptsig-size": None,
-            r"scriptsig-not-pushonly": None,
-            r"scriptpubkey":
-                ("scriptpubkey\n" +
-                 _("Some of the outputs pay to a non-standard script.")),
-            r"bare-multisig": None,
-            r"dust":
-                (_("Transaction could not be broadcast due to dust outputs.\n"
-                   "Some of the outputs are too small in value, probably lower than 1000 satoshis.\n"
-                   "Check the units, make sure you haven't confused e.g. mBTC and BTC.")),
-            r"multi-op-return": _("The transaction was rejected because it contains multiple OP_RETURN outputs."),
-        }
-        for substring in policy_error_messages:
-            if substring in server_msg:
-                msg = policy_error_messages[substring]
-                return msg if msg else substring
+
         # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/script/script_error.cpp
         script_error_messages = {
             r"Script evaluated without error but finished with a false/empty top stack element",
@@ -989,7 +969,7 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/validation.cpp
         # grep "REJECT_"
         # grep "TxValidationResult"
-        # should come after script_error.cpp (due to e.g. non-mandatory-script-verify-flag)
+        # should come after script_error.cpp (due to e.g. "non-mandatory-script-verify-flag")
         validation_error_messages = {
             r"coinbase": None,
             r"tx-size-small": None,
@@ -1070,6 +1050,29 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         for substring in tx_verify_error_messages:
             if substring in server_msg:
                 msg = tx_verify_error_messages[substring]
+                return msg if msg else substring
+        # https://github.com/bitcoin/bitcoin/blob/5bb64acd9d3ced6e6f95df282a1a0f8b98522cb0/src/policy/policy.cpp
+        # grep "reason ="
+        # should come after validation.cpp (due to "tx-size" vs "tx-size-small")
+        # should come after script_error.cpp (due to e.g. "version")
+        policy_error_messages = {
+            r"version": _("Transaction uses non-standard version."),
+            r"tx-size": _("The transaction was rejected because it is too large (in bytes)."),
+            r"scriptsig-size": None,
+            r"scriptsig-not-pushonly": None,
+            r"scriptpubkey":
+                ("scriptpubkey\n" +
+                 _("Some of the outputs pay to a non-standard script.")),
+            r"bare-multisig": None,
+            r"dust":
+                (_("Transaction could not be broadcast due to dust outputs.\n"
+                   "Some of the outputs are too small in value, probably lower than 1000 satoshis.\n"
+                   "Check the units, make sure you haven't confused e.g. mBTC and BTC.")),
+            r"multi-op-return": _("The transaction was rejected because it contains multiple OP_RETURN outputs."),
+        }
+        for substring in policy_error_messages:
+            if substring in server_msg:
+                msg = policy_error_messages[substring]
                 return msg if msg else substring
         # otherwise:
         return _("Unknown error")
@@ -1328,11 +1331,19 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
         session = self.interface.session
         return parse_servers(await session.send_request('server.peers.subscribe'))
 
-    async def send_multiple_requests(self, servers: Sequence[ServerAddr], method: str, params: Sequence):
+    async def send_multiple_requests(
+            self,
+            servers: Sequence[ServerAddr],
+            method: str,
+            params: Sequence,
+            *,
+            timeout: int = None,
+    ):
+        if timeout is None:
+            timeout = self.get_network_timeout_seconds(NetworkTimeout.Urgent)
         responses = dict()
         async def get_response(server: ServerAddr):
             interface = Interface(network=self, server=server, proxy=self.proxy)
-            timeout = self.get_network_timeout_seconds(NetworkTimeout.Urgent)
             try:
                 await asyncio.wait_for(interface.ready, timeout)
             except BaseException as e:
@@ -1347,3 +1358,12 @@ class Network(Logger, NetworkRetryManager[ServerAddr]):
             for server in servers:
                 await group.spawn(get_response(server))
         return responses
+
+    async def prune_offline_servers(self, hostmap):
+        peers = filter_protocol(hostmap, allowed_protocols=("t", "s",))
+        timeout = self.get_network_timeout_seconds(NetworkTimeout.Generic)
+        replies = await self.send_multiple_requests(peers, 'blockchain.headers.subscribe', [], timeout=timeout)
+        servers_replied = {serveraddr.host for serveraddr in replies.keys()}
+        servers_dict = {k: v for k, v in hostmap.items()
+                        if k in servers_replied}
+        return servers_dict

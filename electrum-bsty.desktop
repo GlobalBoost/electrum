@@ -14,7 +14,7 @@ StartupNotify=true
 StartupWMClass=electrum
 Terminal=false
 Type=Application
-MimeType=x-scheme-handler/globalBoost;
+MimeType=x-scheme-handler/globalBoost;x-scheme-handler/lightning;
 Actions=Testnet;
 
 [Desktop Action Testnet]

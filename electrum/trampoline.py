@@ -2,7 +2,7 @@ import os
 import bitstring
 import random
 
-from typing import Mapping
+from typing import Mapping, DefaultDict
 
 from .logging import get_logger, Logger
 from .lnutil import LnFeatures
@@ -66,7 +66,8 @@ TRAMPOLINE_NODES_TESTNET = {
 }
 
 TRAMPOLINE_NODES_SIGNET = {
-    'wakiyamap.dev': LNPeerAddr(host='signet-electrumx.wakiyamap.dev', port=9735, pubkey=bytes.fromhex('02dadf6c28f3284d591cd2a4189d1530c1ff82c07059ebea150a33ab76e7364b4a')),
+    'lnd wakiyamap.dev': LNPeerAddr(host='signet-electrumx.wakiyamap.dev', port=9735, pubkey=bytes.fromhex('02dadf6c28f3284d591cd2a4189d1530c1ff82c07059ebea150a33ab76e7364b4a')),
+    'eclair wakiyamap.dev': LNPeerAddr(host='signet-eclair.wakiyamap.dev', port=9735, pubkey=bytes.fromhex('0271cf3881e6eadad960f47125434342e57e65b98a78afa99f9b4191c02dd7ab3b')),
 }
 
 _TRAMPOLINE_NODES_UNITTESTS = {}  # used in unit tests
@@ -107,7 +108,7 @@ def create_trampoline_route(
         my_pubkey: bytes,
         trampoline_node_id: bytes,  # the first trampoline in the path; which we are directly connected to
         r_tags,
-        trampoline_fee_level: int,
+        trampoline_fee_levels: DefaultDict[bytes, int],
         use_two_trampolines: bool) -> LNPaymentRoute:
 
     # figure out whether we can use end-to-end trampoline, or fallback to pay-to-legacy
@@ -140,7 +141,8 @@ def create_trampoline_route(
         if pubkey == TRAMPOLINE_NODES_MAINNET['ACINQ'].pubkey:
             is_legacy = True
             use_two_trampolines = False
-    # fee level. the same fee is used for all trampolines
+    # fee level
+    trampoline_fee_level = trampoline_fee_levels[trampoline_node_id]
     if trampoline_fee_level < len(TRAMPOLINE_FEES):
         params = TRAMPOLINE_FEES[trampoline_fee_level]
     else:
@@ -184,16 +186,22 @@ def create_trampoline_route(
         route[-1].outgoing_node_id = invoice_pubkey
     else:  # end-to-end trampoline
         if r_tag_chosen_for_e2e_trampoline:
-            pubkey, scid, feebase, feerate, cltv = r_tag_chosen_for_e2e_trampoline
+            pubkey = r_tag_chosen_for_e2e_trampoline[0]
             if route[-1].end_node != pubkey:
-                route.append(
-                    TrampolineEdge(
-                        start_node=route[-1].end_node,
-                        end_node=pubkey,
-                        fee_base_msat=feebase,
-                        fee_proportional_millionths=feerate,
-                        cltv_expiry_delta=cltv,
-                        node_features=trampoline_features))
+                # We don't use the forwarding policy from the route hint, which
+                # is only valid for legacy forwarding. Trampoline forwarders require
+                # higher fees and cltv deltas.
+                trampoline_fee_level = trampoline_fee_levels[pubkey]
+                if trampoline_fee_level < len(TRAMPOLINE_FEES):
+                    fee_policy = TRAMPOLINE_FEES[trampoline_fee_level]
+                    route.append(
+                        TrampolineEdge(
+                            start_node=route[-1].end_node,
+                            end_node=pubkey,
+                            fee_base_msat=fee_policy['fee_base_msat'],
+                            fee_proportional_millionths=fee_policy['fee_proportional_millionths'],
+                            cltv_expiry_delta=fee_policy['cltv_expiry_delta'],
+                            node_features=trampoline_features))
 
     # Final edge (not part of the route if payment is legacy, but eclair requires an encrypted blob)
     route.append(
@@ -239,7 +247,7 @@ def create_trampoline_onion(*, route, amount_msat, final_cltv, total_msat, payme
         # only for final
         if i == num_hops - 1:
             payload["payment_data"] = {
-                "payment_secret":payment_secret,
+                "payment_secret": payment_secret,
                 "total_msat": total_msat
             }
         # legacy
@@ -247,7 +255,7 @@ def create_trampoline_onion(*, route, amount_msat, final_cltv, total_msat, payme
             payload["invoice_features"] = {"invoice_features":route_edge.invoice_features}
             payload["invoice_routing_info"] = {"invoice_routing_info":route_edge.invoice_routing_info}
             payload["payment_data"] = {
-                "payment_secret":payment_secret,
+                "payment_secret": payment_secret,
                 "total_msat": total_msat
             }
         _logger.info(f'payload {i} {payload}')
@@ -269,7 +277,7 @@ def create_trampoline_route_and_onion(
         payment_hash,
         payment_secret,
         local_height:int,
-        trampoline_fee_level: int,
+        trampoline_fee_levels: DefaultDict[bytes, int],
         use_two_trampolines: bool):
     # create route for the trampoline_onion
     trampoline_route = create_trampoline_route(
@@ -280,7 +288,7 @@ def create_trampoline_route_and_onion(
         invoice_features=invoice_features,
         trampoline_node_id=node_id,
         r_tags=r_tags,
-        trampoline_fee_level=trampoline_fee_level,
+        trampoline_fee_levels=trampoline_fee_levels,
         use_two_trampolines=use_two_trampolines)
     # compute onion and fees
     final_cltv = local_height + min_cltv_expiry
