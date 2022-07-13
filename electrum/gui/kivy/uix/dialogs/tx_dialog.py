@@ -125,6 +125,7 @@ class TxDialog(Factory.Popup):
         self.app = app  # type: ElectrumWindow
         self.wallet = self.app.wallet
         self.tx = tx  # type: Transaction
+        self.config = self.app.electrum_config
 
         # If the wallet can populate the inputs with more info, do it now.
         # As a result, e.g. we might learn an imported address tx is segwit,
@@ -154,7 +155,7 @@ class TxDialog(Factory.Popup):
             self.date_str = datetime.fromtimestamp(tx_mined_status.timestamp).isoformat(' ')[:-3]
         elif exp_n is not None:
             self.date_label = _('Mempool depth')
-            self.date_str = _('{} from tip').format('%.2f MB'%(exp_n/1000000))
+            self.date_str = self.config.depth_tooltip(exp_n)
         else:
             self.date_label = ''
             self.date_str = ''
@@ -260,7 +261,7 @@ class TxDialog(Factory.Popup):
         total_size = parent_tx.estimated_size() + new_tx.estimated_size()
         parent_txid = parent_tx.txid()
         assert parent_txid
-        parent_fee = self.wallet.get_tx_fee(parent_txid)
+        parent_fee = self.wallet.adb.get_tx_fee(parent_txid)
         if parent_fee is None:
             self.app.show_error(_("Can't CPFP: unknown fee for parent transaction."))
             return
@@ -355,7 +356,7 @@ class TxDialog(Factory.Popup):
 
         def on_prompt(b):
             if b:
-                self.wallet.remove_transaction(txid)
+                self.wallet.adb.remove_transaction(txid)
                 self.wallet.save_db()
                 self.app._trigger_update_wallet()  # FIXME private...
                 self.dismiss()

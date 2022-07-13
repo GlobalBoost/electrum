@@ -105,7 +105,11 @@ if test -f "dist/$win1"; then
     info "file exists: $win1"
 else
     pushd .
-    ./contrib/build-wine/build.sh
+    if test -f "contrib/build-wine/dist/$win1"; then
+	info "unsigned file exists: $win1"
+    else
+	./contrib/build-wine/build.sh
+    fi
     cd contrib/build-wine/
     if [ ! -z "$RELEASEMANAGER" ] ; then
         ./sign.sh
@@ -125,11 +129,11 @@ if test -f "dist/$apk1"; then
     info "file exists: $apk1"
 else
     if [ ! -z "$RELEASEMANAGER" ] ; then
-        ./contrib/android/build.sh release
+        ./contrib/android/build.sh kivy all release
     else
-        ./contrib/android/build.sh release-unsigned
-        mv "$apk1_unsigned" "$apk1"
-        mv "$apk2_unsigned" "$apk2"
+        ./contrib/android/build.sh kivy all release-unsigned
+        mv "dist/$apk1_unsigned" "dist/$apk1"
+        mv "dist/$apk2_unsigned" "dist/$apk2"
     fi
 fi
 

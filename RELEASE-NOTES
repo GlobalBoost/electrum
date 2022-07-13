@@ -1,3 +1,129 @@
+# Release 4.3.0 - (not released yet)
+
+  This version introduces a set of UX modifications, that aim at
+  simplifying the use of Lightning. The goal is to abstract payments
+  from the payment layer, and to suggest solutions when a payment is
+  prevented by channel liquidity issues.
+
+  - Invoice unification: on-chain and lightning invoices have been
+    merged into a single invoice type. A invoice typically contains
+    both a lightning invoice and an onchain fallback address. The GUI
+    has a single 'create request' button.
+
+  - The receive tab of the GUI can display, for each payment request,
+    a lightning invoice, a BIP21 URI, or an onchain address. If the
+    request is paid off-chain, the associated on-chain address will
+    be recycled in subsequent requests.
+
+  - The receive tab displays whether a payment can be received using
+    Lightning, given the current channel liquidity. If a payment
+    cannot be received, but may be received after a channel rebalance
+    or a submarine swap, the GUI will propose such an operation.
+
+  - For outgoing payments, if channels do not have enough liquidity to
+    pay a lightning invoice, the GUI will suggest available
+    alternatives: rebalance existing channels, open a new channel,
+    perform a submarine swap, or pay to the provided onchain fallback
+    address.
+
+  - A single balance is shown in the GUI. A piechart reflects how that
+    balance is distributed (on-chain, lightning, unconfirmed, frozen,
+    etc).
+
+  - The semantics of the wallet balance has been modified: only
+    incoming transactions are considered in the 'unconfirmed' part of
+    the balance. Indeed, if an outgoing transaction does not get
+    confirmed, that is not going to decrease the wallet balance. Thus,
+    change outputs of outgoing transactions are not subtracted from
+    the confirmed balance. (Before this change, the arithmetic values
+    of both incoming and outgoing transactions were added to the
+    unconfirmed balance, and could potentially cancel eachother.)
+
+
+# Release 4.2.2 - (May 27, 2022)
+ * Lightning:
+   - watching onchain outputs: significant perf. improvements (#7781)
+   - enforce relative order of some msgs during chan reestablishment,
+     lack of which can lead to unwanted force-closures (#7830)
+   - fix: in case of a force-close containing incoming HTLCs, we were
+     redeeming all HTLCs that we know the preimage for. This might
+     publish the preimage of an incomplete MPP. (1a5ef554, e74e9d8e)
+ * Hardware wallets:
+   - smarter pairing during sign_transaction (238619f1)
+   - keepkey: fix pairing with device using a workaround (#7779)
+ * fix AppImage failing to run on certain systems (#7784)
+ * fix "Automated BIP39 recovery" not scanning change paths (#7804)
+ * bypass network proxy for localhost electrum server (#3126)
+ * security fix: remove support of "file://" URIs from BIP70 payment
+   requests, which could be used to trigger "open()" on arbitrary files
+   (see https://github.com/spesmilo/electrum/security/advisories/GHSA-4fh4-hx35-r355)
+
+
+# Release 4.2.1 - (March 26, 2022)
+ * Binaries:
+   - Windows: we are dropping support for Windows 7. (#7728)
+     Version 4.2.0 already unintentionally broke compatibility with
+     Win7 and there is no easy way to restore and maintain support.
+     Existing users can keep using version 4.1.5 for now, but should
+     consider upgrading or changing their OS.
+     Win8.1 still works but only Win10 is regularly tested.
+   - bump bundled Python version (win, mac, appimage) to 3.9.11,
+     (android) to 3.8.13 (1bb7ef92, #7721)
+     (note these include a fix to an openssl DOS-vector CVE-2022-0778)
+   - windows: bump pyinstaller to 4.10 and wine to 7.0 (#7721)
+ * Kivy GUI:
+   - fix "Child Pays For Parent" not working on Android (#7723)
+   - revert to defaulting the UI language to English (25fee6a6)
+ * Qt GUI:
+   - macOS: fix opening "Preferences" segfaulting for some (#7725)
+   - more resilient startup: better error-handling and fallback (#7447)
+ * Library:
+   - fix LN error/warning message-handling, and fix regression that
+     errors during channel-open were not properly shown in GUI (a92dede4)
+   - during LN chan open, do not backup wallet automatically (#7733)
+   - Imported wallets: fix delete_address rm-ing too many txs (#7587)
+   - fix potential deadlock in wallet.py (d3476b6b)
+ * Hardware wallets:
+   - ledger: add progress indicator to sign_transaction (#7516)
+ * fix the "--portable" flag for AppImage, and for pip installs (#7732)
+
+
+# Release 4.2.0 - (March 16, 2022)
+ * The minimum python version was increased to 3.8 (#7661)
+ * Lightning:
+   - redesigned MPP splitting algorithm (#7202)
+   - trampoline: implement multi-trampoline MPP (#7623)
+   - implement option_shutdown_anysegwit, and allow dust limits
+     below 546 sat (#7542)
+   - implement option_channel_type (#7636)
+   - implement modern closing negotiation (#7586, #7680)
+ * improve support for "lightning:" URIs on all platforms (#7301)
+ * Qt GUI:
+   - add setting "show amounts with msat precision" (5891e039)
+   - add setting "add thousand separators to bitcoin amounts" (#7427)
+ * CLI/RPC:
+   - implement Unix sockets and make them the default (#7545, #7566)
+   - add "bumpfee" command (#7438)
+ * Kivy GUI:
+   - show network setup on first start before wallet creation (#7464)
+   - add "Child Pays For Parent" option (#7487)
+   - improved locale handling (22bb52d5, 7cb11ced, 4293d6ec)
+ * Hardware wallets:
+   - trezor: bump trezorlib to 0.13 (#7590)
+   - bitbox02: bump bitbox02 to 6.0, support send-to-taproot (#7693)
+   - ledger: support "Ledger Nano S Plus" (#7692)
+ * Library:
+   - added support for sighash types beside "ALL" (#7453)
+   - signmessage: also accept Trezor-type sigs for segwit addrs (#7668)
+   - network: make request timeout configurable (#7696)
+   - paytomany (onchain txout batching) now allows multiple max("!")
+     amounts with specified weights (#7492)
+ * Binary builds
+   - AppImage: changed base image from ubuntu 16.04 to 18.04 (5d0aa63a)
+ * migrated from Travis CI to Cirrus CI (#7431)
+ * Lots of other minor bugfixes and usability improvements.
+
+
 # Release 4.1.5 - (July 19, 2021)
  * Builds/binaries:
    - macOS: the .dmg binary should now be reproducible

@@ -66,9 +66,8 @@ class AddressDialog(WindowModalDialog):
 
         vbox.addWidget(QLabel(_("Address") + ":"))
         self.addr_e = ButtonsLineEdit(self.address)
-        self.addr_e.addCopyButton(self.app)
-        icon = "qrcode_white.png" if ColorScheme.dark_scheme else "qrcode.png"
-        self.addr_e.addButton(icon, self.show_qr, _("Show QR Code"))
+        self.addr_e.addCopyButton()
+        self.addr_e.add_qr_show_button(config=self.config, title=_("Address"))
         self.addr_e.setReadOnly(True)
         vbox.addWidget(self.addr_e)
 
@@ -80,7 +79,7 @@ class AddressDialog(WindowModalDialog):
             vbox.addWidget(QLabel(_("Public keys") + ':'))
             for pubkey in pubkeys:
                 pubkey_e = ButtonsLineEdit(pubkey)
-                pubkey_e.addCopyButton(self.app)
+                pubkey_e.addCopyButton()
                 pubkey_e.setReadOnly(True)
                 vbox.addWidget(pubkey_e)
 
@@ -88,21 +87,21 @@ class AddressDialog(WindowModalDialog):
         if redeem_script:
             vbox.addWidget(QLabel(_("Redeem Script") + ':'))
             redeem_e = ShowQRTextEdit(text=redeem_script, config=self.config)
-            redeem_e.addCopyButton(self.app)
+            redeem_e.addCopyButton()
             vbox.addWidget(redeem_e)
 
         witness_script = self.wallet.get_witness_script(address)
         if witness_script:
             vbox.addWidget(QLabel(_("Witness Script") + ':'))
             witness_e = ShowQRTextEdit(text=witness_script, config=self.config)
-            witness_e.addCopyButton(self.app)
+            witness_e.addCopyButton()
             vbox.addWidget(witness_e)
 
         address_path_str = self.wallet.get_address_path_str(address)
         if address_path_str:
             vbox.addWidget(QLabel(_("Derivation path") + ':'))
             der_path_e = ButtonsLineEdit(address_path_str)
-            der_path_e.addCopyButton(self.app)
+            der_path_e.addCopyButton()
             der_path_e.setReadOnly(True)
             vbox.addWidget(der_path_e)
 

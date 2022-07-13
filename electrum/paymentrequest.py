@@ -41,7 +41,7 @@ except ImportError:
 
 from . import bitcoin, constants, ecc, util, transaction, x509, rsakey
 from .util import bh2u, bfh, make_aiohttp_session
-from .invoices import OnchainInvoice
+from .invoices import Invoice, get_id_from_onchain_outputs
 from .crypto import sha256
 from .bitcoin import address_to_script
 from .transaction import PartialTxOutput
@@ -105,13 +105,6 @@ async def get_payment_request(url: str) -> 'PaymentRequest':
                     _logger.info(f"{error_oneline} -- [DO NOT TRUST THIS MESSAGE] "
                                  f"{repr(e)} text: {error_text_received}")
             data = None
-    elif u.scheme == 'file':
-        try:
-            with open(u.path, 'r', encoding='utf-8') as f:
-                data = f.read()
-        except IOError:
-            data = None
-            error = "payment URL not pointing to a valid file"
     else:
         data = None
         error = f"Unknown scheme for payment request. URL: {url}"
@@ -121,7 +114,7 @@ async def get_payment_request(url: str) -> 'PaymentRequest':
 
 class PaymentRequest:
 
-    def __init__(self, data, *, error=None):
+    def __init__(self, data: bytes, *, error=None):
         self.raw = data
         self.error = error  # FIXME overloaded and also used when 'verify' succeeds
         self.parse(data)
@@ -131,11 +124,10 @@ class PaymentRequest:
     def __str__(self):
         return str(self.raw)
 
-    def parse(self, r):
+    def parse(self, r: bytes):
         self.outputs = []  # type: List[PartialTxOutput]
         if self.error:
             return
-        self.id = bh2u(sha256(r)[0:16])
         try:
             self.data = pb2.PaymentRequest()
             self.data.ParseFromString(r)
@@ -275,8 +267,10 @@ class PaymentRequest:
     def get_memo(self):
         return self.memo
 
-    def get_id(self):
-        return self.id if self.requestor else self.get_address()
+    def get_name_for_export(self) -> Optional[str]:
+        if not hasattr(self, 'details'):
+            return None
+        return get_id_from_onchain_outputs(self.outputs, timestamp=self.get_time())
 
     def get_outputs(self):
         return self.outputs[:]
@@ -324,7 +318,7 @@ class PaymentRequest:
             return False, error
 
 
-def make_unsigned_request(req: 'OnchainInvoice'):
+def make_unsigned_request(req: 'Invoice'):
     addr = req.get_address()
     time = req.time
     exp = req.exp
@@ -332,7 +326,7 @@ def make_unsigned_request(req: 'OnchainInvoice'):
         time = 0
     if exp and type(exp) != int:
         exp = 0
-    amount = req.amount_sat
+    amount = req.get_amount_sat()
     if amount is None:
         amount = 0
     memo = req.message
@@ -465,7 +459,7 @@ def serialize_request(req):  # FIXME this is broken
     return pr
 
 
-def make_request(config: 'SimpleConfig', req: 'OnchainInvoice'):
+def make_request(config: 'SimpleConfig', req: 'Invoice'):
     pr = make_unsigned_request(req)
     key_path = config.get('ssl_keyfile')
     cert_path = config.get('ssl_certfile')
