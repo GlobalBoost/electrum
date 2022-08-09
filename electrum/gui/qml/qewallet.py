@@ -1,30 +1,25 @@
-from typing import Optional, TYPE_CHECKING, Sequence, List, Union
-import queue
-import time
 import asyncio
+import queue
 import threading
+import time
+from typing import Optional
 
-from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, QUrl, QTimer
+from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, QTimer
 
-from electrum.i18n import _
-from electrum.util import (Satoshis, format_time, parse_max_spend, InvalidPassword,
-                           event_listener)
-from electrum.logging import get_logger
-from electrum.wallet import Wallet, Abstract_Wallet
-from electrum.storage import StorageEncryptionVersion
 from electrum import bitcoin
-from electrum.transaction import PartialTxOutput
-from electrum.invoices import (Invoice, InvoiceError,
-                               PR_DEFAULT_EXPIRATION_WHEN_CREATING, PR_PAID,
-                               PR_UNPAID, PR_UNKNOWN, PR_EXPIRED, PR_UNCONFIRMED)
+from electrum.i18n import _
+from electrum.invoices import (InvoiceError)
+from electrum.logging import get_logger
 from electrum.network import TxBroadcastError, BestEffortRequestFailed
+from electrum.transaction import PartialTxOutput
+from electrum.util import (parse_max_spend, InvalidPassword, event_listener)
 
-from .qeinvoicelistmodel import QEInvoiceListModel, QERequestListModel
-from .qetransactionlistmodel import QETransactionListModel
+from .auth import AuthMixin, auth_protect
 from .qeaddresslistmodel import QEAddressListModel
 from .qechannellistmodel import QEChannelListModel
+from .qeinvoicelistmodel import QEInvoiceListModel, QERequestListModel
+from .qetransactionlistmodel import QETransactionListModel
 from .qetypes import QEAmount
-from .auth import AuthMixin, auth_protect
 from .util import QtEventListener, qt_event_listener
 
 class QEWallet(AuthMixin, QObject, QtEventListener):
@@ -63,6 +58,10 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
 
     _network_signal = pyqtSignal(str, object)
 
+    _isUpToDate = False
+    _synchronizing = False
+    _synchronizing_progress = ''
+
     def __init__(self, wallet, parent=None):
         super().__init__(parent)
         self.wallet = wallet
@@ -81,54 +80,71 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
         self.notification_timer.setInterval(500)  # msec
         self.notification_timer.timeout.connect(self.notify_transactions)
 
-        #self._network_signal.connect(self.on_network_qt)
-        interests = ['wallet_updated', 'new_transaction', 'status', 'verified',
-                     'on_history', 'channel', 'channels_updated', 'payment_failed',
-                     'payment_succeeded', 'invoice_status', 'request_status']
         # To avoid leaking references to "self" that prevent the
         # window from being GC-ed when closed, callbacks should be
         # methods of this class only, and specifically not be
         # partials, lambdas or methods of subobjects.  Hence...
-        #register_callback(self.on_network, interests)
+
         self.register_callbacks()
         self.destroyed.connect(lambda: self.on_destroy())
 
     @pyqtProperty(bool, notify=isUptodateChanged)
     def isUptodate(self):
-        return self.wallet.is_up_to_date()
+        return self._isUpToDate
 
-    def on_network(self, event, *args):
-        if event in ['new_transaction', 'payment_succeeded']:
-            # Handle in GUI thread (_network_signal -> on_network_qt)
-            self._network_signal.emit(event, args)
-        else:
-            self.on_network_qt(event, args)
+    synchronizingChanged = pyqtSignal()
+    @pyqtProperty(bool, notify=synchronizingChanged)
+    def synchronizing(self):
+        return self._synchronizing
 
-    def on_network_qt(self, event, args=None):
-        # note: we get events from all wallets! args are heterogenous so we can't
-        # shortcut here
-        if event != 'status':
-            wallet = args[0]
-            if wallet == self.wallet:
-                self._logger.debug('event %s' % event)
+    @synchronizing.setter
+    def synchronizing(self, synchronizing):
+        if self._synchronizing != synchronizing:
+            self._synchronizing = synchronizing
+            self.synchronizingChanged.emit()
+
+    synchronizingProgressChanged = pyqtSignal()
+    @pyqtProperty(str, notify=synchronizingProgressChanged)
+    def synchronizing_progress(self):
+        return self._synchronizing_progress
+
+    @synchronizing_progress.setter
+    def synchronizing_progress(self, progress):
+        if self._synchronizing_progress != progress:
+            self._synchronizing_progress = progress
+            self.synchronizingProgressChanged.emit()
 
     @event_listener
-    def on_event_status(self, *args, **kwargs):
-        #if event == 'status':
+    def on_event_status(self):
+        self._logger.debug('status')
+        uptodate = self.wallet.is_up_to_date()
+        if self._isUpToDate != uptodate:
+            self._isUpToDate = uptodate
             self.isUptodateChanged.emit()
 
+        if self.wallet.network.is_connected():
+            server_height = self.wallet.network.get_server_height()
+            server_lag = self.wallet.network.get_local_height() - server_height
+            # Server height can be 0 after switching to a new server
+            # until we get a headers subscription request response.
+            # Display the synchronizing message in that case.
+            if not self._isUpToDate or server_height == 0:
+                num_sent, num_answered = self.wallet.adb.get_history_sync_state_details()
+                self.synchronizing_progress = ("{} ({}/{})"
+                                .format(_("Synchronizing..."), num_answered, num_sent))
+                self.synchronizing = True
+            else:
+                self.synchronizing_progress = ''
+                self.synchronizing = False
 
-    #    elif event == 'request_status':
     @event_listener
     def on_event_request_status(self, wallet, key, status):
-            #wallet, key, status = args
         if wallet == self.wallet:
             self._logger.debug('request status %d for key %s' % (status, key))
             self.requestStatusChanged.emit(key, status)
-    #    elif event == 'invoice_status':
+
     @event_listener
     def on_event_invoice_status(self, wallet, key):
-            #wallet, key = args
         if wallet == self.wallet:
             self._logger.debug('invoice status update for key %s' % key)
             # FIXME event doesn't pass the new status, so we need to retrieve
@@ -139,64 +155,45 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
             else:
                 self._logger.debug(f'No invoice found for key {key}')
 
-        #elif event == 'new_transaction':
     @qt_event_listener
-    def on_event_new_transaction(self, *args):
-        wallet, tx = args
+    def on_event_new_transaction(self, wallet, tx):
         if wallet == self.wallet:
             self.add_tx_notification(tx)
             self.historyModel.init_model() # TODO: be less dramatic
 
-
-    #    elif event == 'verified':
     @qt_event_listener
     def on_event_verified(self, wallet, txid, info):
-            #wallet, txid, info = args
         if wallet == self.wallet:
             self.historyModel.update_tx(txid, info)
 
-
-    #    elif event == 'wallet_updated':
     @event_listener
     def on_event_wallet_updated(self, wallet):
-            #wallet, = args
         if wallet == self.wallet:
             self._logger.debug('wallet %s updated' % str(wallet))
             self.balanceChanged.emit()
 
-    #    elif event == 'channel':
     @event_listener
     def on_event_channel(self, wallet, channel):
-            #wallet, channel = args
-            if wallet == self.wallet:
-                self.balanceChanged.emit()
-
-    #    elif event == 'channels_updated':
-    @event_listener
-    def on_event_channels_updated(self, wallet):
-            #wallet, = args
         if wallet == self.wallet:
             self.balanceChanged.emit()
-    #    elif event == 'payment_succeeded':
+
+    @event_listener
+    def on_event_channels_updated(self, wallet):
+        if wallet == self.wallet:
+            self.balanceChanged.emit()
 
     @qt_event_listener
     def on_event_payment_succeeded(self, wallet, key):
-            #wallet, key = args
         if wallet == self.wallet:
             self.paymentSucceeded.emit(key)
             self.historyModel.init_model() # TODO: be less dramatic
 
-    #    elif event == 'payment_failed':
     @event_listener
     def on_event_payment_failed(self, wallet, key, reason):
-            #wallet, key, reason = args
         if wallet == self.wallet:
             self.paymentFailed.emit(key, reason)
-        #else:
-            #self._logger.debug('unhandled event: %s %s' % (event, str(args)))
 
     def on_destroy(self):
-        #unregister_callback(self.on_network)
         self.unregister_callbacks()
 
     def add_tx_notification(self, tx):
@@ -545,10 +542,8 @@ class QEWallet(AuthMixin, QObject, QtEventListener):
         if storage.is_encrypted_with_hw_device():
             return
 
-        self._logger.debug('Ok to set password for wallet with path %s' % storage.path)
-        if password:
-            enc_version = StorageEncryptionVersion.USER_PASSWORD
-        else:
-            enc_version = StorageEncryptionVersion.PLAINTEXT
-        storage.set_password(password, enc_version=enc_version)
-        self.wallet.save_db()
+        try:
+            self.wallet.update_password(self.password, password, encrypt_storage=True)
+            self.password = password
+        except InvalidPassword as e:
+            self._logger.exception(repr(e))

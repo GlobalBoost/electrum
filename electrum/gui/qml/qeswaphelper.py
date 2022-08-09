@@ -1,17 +1,17 @@
 import asyncio
-from typing import TYPE_CHECKING, Optional, Union
+from typing import Union
 
 from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
 
 from electrum.i18n import _
-from electrum.logging import get_logger
 from electrum.lnutil import ln_dummy_address
+from electrum.logging import get_logger
 from electrum.transaction import PartialTxOutput
 from electrum.util import NotEnoughFunds, NoDynamicFeeEstimates, profiler
 
-from .qewallet import QEWallet
-from .qetypes import QEAmount
 from .auth import AuthMixin, auth_protect
+from .qetypes import QEAmount
+from .qewallet import QEWallet
 
 class QESwapHelper(AuthMixin, QObject):
     _logger = get_logger(__name__)
@@ -262,7 +262,7 @@ class QESwapHelper(AuthMixin, QObject):
             # fee breakdown
             self.serverfeeperc = f'{swap_manager.percentage:0.1f}%'
             self.serverfee = QEAmount(amount_sat=swap_manager.normal_fee)
-            self.miningfee = QEAmount(amount_sat=self._tx.get_fee())
+            self.miningfee = QEAmount(amount_sat=self._tx.get_fee()) if self._tx else QEAmount()
 
         if pay_amount and receive_amount:
             self.valid = True

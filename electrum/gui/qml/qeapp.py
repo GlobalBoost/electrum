@@ -14,7 +14,7 @@ from .qeconfig import QEConfig
 from .qedaemon import QEDaemon, QEWalletListModel
 from .qenetwork import QENetwork
 from .qewallet import QEWallet
-from .qeqr import QEQRParser, QEQRImageProvider
+from .qeqr import QEQRParser, QEQRImageProvider, QEQRImageProviderHelper
 from .qewalletdb import QEWalletDB
 from .qebitcoin import QEBitcoin
 from .qefx import QEFX
@@ -97,7 +97,9 @@ class QEAppController(QObject):
                     + '/../icons/electrum.png')
             notification.notify('Electrum', message, app_icon=icon, app_name='Electrum')
         except ImportError:
-            self.logger.error('Notification: needs plyer; `sudo python3 -m pip install plyer`')
+            self.logger.warning('Notification: needs plyer; `sudo python3 -m pip install plyer`')
+        except Exception as e:
+            self.logger.error(repr(e))
 
     @pyqtSlot(str, str)
     def doShare(self, data, title):
@@ -139,7 +141,6 @@ class ElectrumQmlApplication(QGuiApplication):
 
         ElectrumQmlApplication._daemon = daemon
 
-        qmlRegisterType(QEWalletListModel, 'org.electrum', 1, 0, 'WalletListModel')
         qmlRegisterType(QEWallet, 'org.electrum', 1, 0, 'Wallet')
         qmlRegisterType(QEWalletDB, 'org.electrum', 1, 0, 'WalletDB')
         qmlRegisterType(QEBitcoin, 'org.electrum', 1, 0, 'Bitcoin')
@@ -165,6 +166,7 @@ class ElectrumQmlApplication(QGuiApplication):
 
         self.qr_ip = QEQRImageProvider((7/8)*min(screensize.width(), screensize.height()))
         self.engine.addImageProvider('qrgen', self.qr_ip)
+        self.qr_ip_h = QEQRImageProviderHelper((7/8)*min(screensize.width(), screensize.height()))
 
         # add a monospace font as we can't rely on device having one
         self.fixedFont = 'PT Mono'
@@ -176,7 +178,7 @@ class ElectrumQmlApplication(QGuiApplication):
 
         self.context = self.engine.rootContext()
         self._qeconfig = QEConfig(config)
-        self._qenetwork = QENetwork(daemon.network)
+        self._qenetwork = QENetwork(daemon.network, self._qeconfig)
         self._qedaemon = QEDaemon(daemon)
         self._appController = QEAppController(self._qedaemon)
         self._maxAmount = QEAmount(is_max=True)
@@ -186,6 +188,7 @@ class ElectrumQmlApplication(QGuiApplication):
         self.context.setContextProperty('Daemon', self._qedaemon)
         self.context.setContextProperty('FixedFont', self.fixedFont)
         self.context.setContextProperty('MAX', self._maxAmount)
+        self.context.setContextProperty('QRIP', self.qr_ip_h)
         self.context.setContextProperty('BUILD', {
             'electrum_version': version.ELECTRUM_VERSION,
             'apk_version': version.APK_VERSION,

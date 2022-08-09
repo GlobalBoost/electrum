@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (QLabel, QVBoxLayout, QGridLayout,
                              QHBoxLayout, QCompleter, QWidget, QToolTip)
 
 from electrum import util, paymentrequest
+from electrum import lnutil
 from electrum.plugin import run_hook
 from electrum.i18n import _
 from electrum.util import (get_asyncio_loop, bh2u,
@@ -402,6 +403,9 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         except LnInvoiceException as e:
             self.show_error(_("Error parsing Lightning invoice") + f":\n{e}")
             return
+        except lnutil.IncompatibleOrInsaneFeatures as e:
+            self.show_error(_("Invoice requires unknown or incompatible Lightning feature") + f":\n{e!r}")
+            return
 
         pubkey = bh2u(lnaddr.pubkey.serialize())
         for k,v in lnaddr.tags:
@@ -678,11 +682,12 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
                     _('Funds will be sent to the invoice fallback address.')
                 ])
                 choices[3] = msg
-            if not choices:
-                raise NotEnoughFunds()
             msg = _('You cannot pay that invoice using Lightning.')
             if self.wallet.lnworker.channels:
                 msg += '\n' + _('Your channels can send {}.').format(self.format_amount(num_sats_can_send) + self.base_unit())
+            if not choices:
+                self.window.show_error(msg)
+                return
             r = self.window.query_choice(msg, choices)
             if r is not None:
                 self.save_pending_invoice()

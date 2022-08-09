@@ -609,7 +609,7 @@ class LNGossip(LNWorker):
             orphaned_ids = [c['short_channel_id'] for c in orphaned]
             await self.add_new_ids(orphaned_ids)
         if categorized_chan_upds.good:
-            self.logger.debug(f'on_channel_update: {len(categorized_chan_upds.good)}/{len(chan_upds)}')
+            self.logger.debug(f'process_gossip: {len(categorized_chan_upds.good)}/{len(chan_upds)}')
 
 
 class LNWallet(LNWorker):
@@ -690,8 +690,18 @@ class LNWallet(LNWorker):
         with self.lock:
             return self._channel_backups.copy()
 
+    def get_channel_objects(self) -> Mapping[bytes, AbstractChannel]:
+        r = self.channel_backups
+        r.update(self.channels)
+        return r
+
     def get_channel_by_id(self, channel_id: bytes) -> Optional[Channel]:
         return self._channels.get(channel_id, None)
+
+    def get_channel_by_scid(self, scid: bytes) -> Optional[Channel]:
+        for chan in self._channels.values():
+            if chan.short_channel_id == scid:
+                return chan
 
     def diagnostic_name(self):
         return self.wallet.diagnostic_name()
@@ -975,7 +985,7 @@ class LNWallet(LNWorker):
             if chan.funding_outpoint.to_str() == txo:
                 return chan
 
-    async def on_channel_update(self, chan: Channel):
+    async def handle_onchain_state(self, chan: Channel):
         if type(chan) is ChannelBackup:
             util.trigger_callback('channel', self.wallet, chan)
             return
@@ -2299,6 +2309,10 @@ class LNWallet(LNWorker):
             return (chan, swap_recv_amount)
 
     async def rebalance_channels(self, chan1, chan2, amount_msat):
+        if chan1 == chan2:
+            raise Exception('Rebalance requires two different channels')
+        if not self.channel_db and chan1.node_id == chan2.node_id:
+            raise Exception('Rebalance requires channels from different trampolines')
         lnaddr, invoice = self.create_invoice(
             amount_msat=amount_msat,
             message='rebalance',
@@ -2306,7 +2320,7 @@ class LNWallet(LNWorker):
             fallback_address=None,
             channels = [chan2]
         )
-        await self.pay_invoice(
+        return await self.pay_invoice(
             invoice, channels=[chan1])
 
     def num_sats_can_receive_no_mpp(self) -> Decimal:
@@ -2502,13 +2516,16 @@ class LNWallet(LNWorker):
     def remove_channel_backup(self, channel_id):
         chan = self.channel_backups[channel_id]
         assert chan.can_be_deleted()
+        found = False
         onchain_backups = self.db.get_dict("onchain_channel_backups")
         imported_backups = self.db.get_dict("imported_channel_backups")
         if channel_id.hex() in onchain_backups:
             onchain_backups.pop(channel_id.hex())
-        elif channel_id.hex() in imported_backups:
+            found = True
+        if channel_id.hex() in imported_backups:
             imported_backups.pop(channel_id.hex())
-        else:
+            found = True
+        if not found:
             raise Exception('Channel not found')
         with self.lock:
             self._channel_backups.pop(channel_id)

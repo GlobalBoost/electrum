@@ -1,21 +1,19 @@
-import asyncio
-from datetime import datetime
-
 from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, Q_ENUMS
 
-from electrum.logging import get_logger
-from electrum.i18n import _
-from electrum.util import (parse_URI, create_bip21_uri, InvalidBitcoinURI, InvoiceError,
-                           maybe_extract_lightning_payment_identifier)
-from electrum.invoices import Invoice
-from electrum.invoices import (PR_UNPAID,PR_EXPIRED,PR_UNKNOWN,PR_PAID,PR_INFLIGHT,
-                               PR_FAILED,PR_ROUTING,PR_UNCONFIRMED,LN_EXPIRY_NEVER)
-from electrum.transaction import PartialTxOutput
-from electrum.lnaddr import lndecode
 from electrum import bitcoin
+from electrum import lnutil
+from electrum.i18n import _
+from electrum.invoices import Invoice
+from electrum.invoices import (PR_UNPAID, PR_EXPIRED, PR_UNKNOWN, PR_PAID, PR_INFLIGHT,
+                               PR_FAILED, PR_ROUTING, PR_UNCONFIRMED)
+from electrum.lnaddr import LnInvoiceException
+from electrum.logging import get_logger
+from electrum.transaction import PartialTxOutput
+from electrum.util import (parse_URI, InvalidBitcoinURI, InvoiceError,
+                           maybe_extract_lightning_payment_identifier)
 
-from .qewallet import QEWallet
 from .qetypes import QEAmount
+from .qewallet import QEWallet
 
 class QEInvoice(QObject):
     class Type:
@@ -334,11 +332,21 @@ class QEInvoiceParser(QEInvoice):
             self._logger.debug(repr(e))
 
         lninvoice = None
-        try:
-            maybe_lightning_invoice = maybe_extract_lightning_payment_identifier(maybe_lightning_invoice)
-            lninvoice = Invoice.from_bech32(maybe_lightning_invoice)
-        except InvoiceError as e:
-            pass
+        maybe_lightning_invoice = maybe_extract_lightning_payment_identifier(maybe_lightning_invoice)
+        if maybe_lightning_invoice is not None:
+            try:
+                lninvoice = Invoice.from_bech32(maybe_lightning_invoice)
+            except InvoiceError as e:
+                e2 = e.__cause__
+                if isinstance(e2, LnInvoiceException):
+                    self.validationError.emit('unknown', _("Error parsing Lightning invoice") + f":\n{e2}")
+                    self.clear()
+                    return
+                if isinstance(e2, lnutil.IncompatibleOrInsaneFeatures):
+                    self.validationError.emit('unknown', _("Invoice requires unknown or incompatible Lightning feature") + f":\n{e2!r}")
+                    self.clear()
+                    return
+                self._logger.exception(repr(e))
 
         if not lninvoice and not self._bip21:
             self.validationError.emit('unknown',_('Unknown invoice'))

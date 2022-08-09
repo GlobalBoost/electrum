@@ -1,12 +1,10 @@
-from datetime import datetime, timedelta
-
-from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
 from PyQt5.QtCore import Qt, QAbstractListModel, QModelIndex
+from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot
 
+from electrum.lnchannel import ChannelState
+from electrum.lnutil import LOCAL, REMOTE
 from electrum.logging import get_logger
 from electrum.util import Satoshis
-from electrum.lnutil import LOCAL, REMOTE
-from electrum.lnchannel import ChannelState
 
 from .qetypes import QEAmount
 from .util import QtEventListener, qt_event_listener
@@ -15,9 +13,9 @@ class QEChannelListModel(QAbstractListModel, QtEventListener):
     _logger = get_logger(__name__)
 
     # define listmodel rolemap
-    _ROLE_NAMES=('cid','state','initiator','capacity','can_send','can_receive',
-                 'l_csv_delay','r_csv_delay','send_frozen','receive_frozen',
-                 'type','node_id','node_alias','short_cid','funding_tx')
+    _ROLE_NAMES=('cid','state','state_code','initiator','capacity','can_send',
+                 'can_receive','l_csv_delay','r_csv_delay','send_frozen','receive_frozen',
+                 'type','node_id','node_alias','short_cid','funding_tx','is_trampoline')
     _ROLE_KEYS = range(Qt.UserRole, Qt.UserRole + len(_ROLE_NAMES))
     _ROLE_MAP  = dict(zip(_ROLE_KEYS, [bytearray(x.encode()) for x in _ROLE_NAMES]))
     _ROLE_RMAP = dict(zip(_ROLE_NAMES, _ROLE_KEYS))
@@ -78,11 +76,11 @@ class QEChannelListModel(QAbstractListModel, QtEventListener):
         item['node_alias'] = lnworker.get_node_alias(lnc.node_id) or lnc.node_id.hex()
         item['short_cid'] = lnc.short_id_for_GUI()
         item['state'] = lnc.get_state_for_GUI()
-        item['state_code'] = lnc.get_state()
+        item['state_code'] = int(lnc.get_state())
         item['capacity'] = QEAmount(amount_sat=lnc.get_capacity())
         item['can_send'] = QEAmount(amount_msat=lnc.available_to_spend(LOCAL))
         item['can_receive'] = QEAmount(amount_msat=lnc.available_to_spend(REMOTE))
-        self._logger.debug(repr(item))
+        item['is_trampoline'] = lnworker.is_trampoline_peer(lnc.node_id)
         return item
 
     numOpenChannelsChanged = pyqtSignal()
@@ -99,11 +97,18 @@ class QEChannelListModel(QAbstractListModel, QtEventListener):
 
         channels = []
 
-        lnchannels = self.wallet.lnworker.channels
+        lnchannels = self.wallet.lnworker.get_channel_objects()
         for channel in lnchannels.values():
-            self._logger.debug(repr(channel))
+            if channel.is_backup():
+                # not implemented
+                continue
             item = self.channel_to_model(channel)
             channels.append(item)
+
+        # sort, for now simply by state
+        def chan_sort_score(c):
+            return c['state_code']
+        channels.sort(key=chan_sort_score)
 
         self.clear()
         self.beginInsertRows(QModelIndex(), 0, len(channels) - 1)
@@ -120,7 +125,6 @@ class QEChannelListModel(QAbstractListModel, QtEventListener):
 
     def do_update(self, modelindex, channel):
         modelitem = self.channels[modelindex]
-        #self._logger.debug(repr(modelitem))
         modelitem.update(self.channel_to_model(channel))
 
         mi = self.createIndex(modelindex, 0)
