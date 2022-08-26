@@ -21,7 +21,7 @@ class QETransactionListModel(QAbstractListModel):
     # define listmodel rolemap
     _ROLE_NAMES=('txid','fee_sat','height','confirmations','timestamp','monotonic_timestamp',
                  'incoming','value','balance','date','label','txpos_in_block','fee',
-                 'inputs','outputs','section','type','lightning','payment_hash','key')
+                 'inputs','outputs','section','type','lightning','payment_hash','key','complete')
     _ROLE_KEYS = range(Qt.UserRole, Qt.UserRole + len(_ROLE_NAMES))
     _ROLE_MAP  = dict(zip(_ROLE_KEYS, [bytearray(x.encode()) for x in _ROLE_NAMES]))
     _ROLE_RMAP = dict(zip(_ROLE_NAMES, _ROLE_KEYS))
@@ -35,7 +35,13 @@ class QETransactionListModel(QAbstractListModel):
     def data(self, index, role):
         tx = self.tx_history[index.row()]
         role_index = role - Qt.UserRole
-        value = tx[self._ROLE_NAMES[role_index]]
+
+        try:
+            value = tx[self._ROLE_NAMES[role_index]]
+        except KeyError as e:
+            self._logger.error(f'non-existing key "{self._ROLE_NAMES[role_index]}" requested')
+            value = None
+
         if isinstance(value, (bool, list, int, str, QEAmount)) or value is None:
             return value
         if isinstance(value, Satoshis):
@@ -86,6 +92,13 @@ class QETransactionListModel(QAbstractListModel):
             item['section'] = 'older'
 
         item['date'] = self.format_date_by_section(item['section'], datetime.fromtimestamp(item['timestamp']))
+
+        if 'txid' in item:
+            tx = self.wallet.get_input_tx(item['txid'])
+            item['complete'] = tx.is_complete()
+        #else:
+            #item['complete'] = True
+
         return item
 
     def format_date_by_section(self, section, date):

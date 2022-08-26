@@ -168,6 +168,7 @@ task:
     path: "contrib/build-wine/dist/*"
   env:
     CIRRUS_WORKING_DIR: /opt/wine64/drive_c/electrum
+    CIRRUS_DOCKER_CONTEXT: contrib/build-wine
 
 task:
   name: Android build
@@ -206,9 +207,10 @@ task:
     - ./contrib/build-linux/appimage/make_appimage.sh
   binaries_artifacts:
     path: "dist/*"
+  env:
+    CIRRUS_DOCKER_CONTEXT: contrib/build-linux/appimage
 
 task:
-  name: tarball build
   container:
     dockerfile: contrib/build-linux/sdist/Dockerfile
     cpu: 1
@@ -217,6 +219,11 @@ task:
     - ./contrib/build-linux/sdist/make_sdist.sh
   binaries_artifacts:
     path: "dist/*"
+  matrix:
+    - name: tarball build
+    - name: source-only tarball build
+      env:
+        OMIT_UNCLEAN_FILES: 1
 
 task:
   name: Submodules

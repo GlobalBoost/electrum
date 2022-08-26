@@ -59,7 +59,7 @@ Pane {
             id: changePasswordComp
             MenuItem {
                 icon.color: 'transparent'
-                enabled: Daemon.currentWallet // != null
+                enabled: Daemon.currentWallet
                 action: Action {
                     text: qsTr('Change Password');
                     onTriggered: rootItem.changePassword()
@@ -71,7 +71,7 @@ Pane {
             id: deleteWalletComp
             MenuItem {
                 icon.color: 'transparent'
-                enabled: Daemon.currentWallet // != null
+                enabled: Daemon.currentWallet
                 action: Action {
                     text: qsTr('Delete Wallet');
                     onTriggered: rootItem.deleteWallet()
@@ -87,7 +87,7 @@ Pane {
                 action: Action {
                     text: qsTr('Enable Lightning');
                     onTriggered: rootItem.enableLightning()
-                    enabled: Daemon.currentWallet != null && Daemon.currentWallet.canHaveLightning && !Daemon.currentWallet.isLightning
+                    enabled: Daemon.currentWallet && Daemon.currentWallet.canHaveLightning && !Daemon.currentWallet.isLightning
                     icon.source: '../../icons/lightning.png'
                 }
             }
@@ -100,7 +100,7 @@ Pane {
 
         // add items dynamically, if using visible: false property the menu item isn't removed but empty
         Component.onCompleted: {
-            if (Daemon.currentWallet != null) {
+            if (Daemon.currentWallet) {
                 menu.insertItem(0, sepComp.createObject(menu))
                 if (Daemon.currentWallet.canHaveLightning && !Daemon.currentWallet.isLightning) {
                     menu.insertItem(0, enableLightningComp.createObject(menu))
@@ -118,7 +118,7 @@ Pane {
 
         GridLayout {
             id: detailsLayout
-            visible: Daemon.currentWallet != null
+            visible: Daemon.currentWallet
             Layout.preferredWidth: parent.width
 
             columns: 4
@@ -171,9 +171,9 @@ Pane {
                         icon.source: '../../icons/share.png'
                         icon.color: 'transparent'
                         onClicked: {
-                            var dialog = share.createObject(rootItem, {
-                                'title': qsTr('Master Public Key'),
-                                'text': Daemon.currentWallet.masterPubkey
+                            var dialog = app.genericShareDialog.createObject(rootItem, {
+                                title: qsTr('Master Public Key'),
+                                text: Daemon.currentWallet.masterPubkey
                             })
                             dialog.open()
                         }
@@ -183,7 +183,7 @@ Pane {
         }
 
         ColumnLayout {
-            visible: Daemon.currentWallet == null
+            visible: !Daemon.currentWallet
 
             Layout.alignment: Qt.AlignHCenter
             Layout.bottomMargin: constants.paddingXXLarge
@@ -354,13 +354,6 @@ Pane {
                 Daemon.currentWallet.set_password(dialog.password)
             })
             dialog.open()
-        }
-    }
-
-    Component {
-        id: share
-        GenericShareDialog {
-            onClosed: destroy()
         }
     }
 }

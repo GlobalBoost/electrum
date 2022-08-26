@@ -18,30 +18,30 @@ info "Last commit: $VERSION"
 # Load electrum-locale for this release
 git submodule update --init
 
-pushd ./contrib/deterministic-build/electrum-locale
-if ! which msgfmt > /dev/null 2>&1; then
-    fail "Please install gettext"
-fi
+LOCALE="$WINEPREFIX/drive_c/electrum/electrum/locale/"
 # we want the binary to have only compiled (.mo) locale files; not source (.po) files
-rm -rf "$WINEPREFIX/drive_c/electrum/electrum/locale/"
-for i in ./locale/*; do
-    dir="$WINEPREFIX/drive_c/electrum/electrum/$i/LC_MESSAGES"
-    mkdir -p $dir
-    msgfmt --output-file="$dir/electrum.mo" "$i/electrum.po" || true
-done
-popd
+rm -rf "$LOCALE"
+"$CONTRIB/build_locale.sh" "$CONTRIB/deterministic-build/electrum-locale/locale/" "$LOCALE"
 
 find -exec touch -h -d '2000-11-11T11:11:11+00:00' {} +
 popd
 
 
-# Install frozen dependencies
-$WINE_PYTHON -m pip install --no-build-isolation --no-dependencies --no-warn-script-location \
-    --cache-dir "$WINE_PIP_CACHE_DIR" -r "$CONTRIB"/deterministic-build/requirements.txt
+# opt out of compiling C extensions
+export AIOHTTP_NO_EXTENSIONS=1
+export YARL_NO_EXTENSIONS=1
+export MULTIDICT_NO_EXTENSIONS=1
+export FROZENLIST_NO_EXTENSIONS=1
 
+info "Installing requirements..."
+$WINE_PYTHON -m pip install --no-build-isolation --no-dependencies --no-binary :all: --no-warn-script-location \
+    --cache-dir "$WINE_PIP_CACHE_DIR" -r "$CONTRIB"/deterministic-build/requirements.txt
+info "Installing dependencies specific to binaries..."
+# TODO use "--no-binary :all:" (but we don't have a C compiler...)
 $WINE_PYTHON -m pip install --no-build-isolation --no-dependencies --no-warn-script-location \
     --cache-dir "$WINE_PIP_CACHE_DIR" -r "$CONTRIB"/deterministic-build/requirements-binaries.txt
-
+info "Installing hardware wallet requirements..."
+# TODO use "--no-binary :all:" (but we don't have a C compiler...)
 $WINE_PYTHON -m pip install --no-build-isolation --no-dependencies --no-warn-script-location \
     --cache-dir "$WINE_PIP_CACHE_DIR" -r "$CONTRIB"/deterministic-build/requirements-hw.txt
 

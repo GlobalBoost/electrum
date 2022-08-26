@@ -31,11 +31,29 @@ class QEAmount(QObject):
 
     @pyqtProperty('qint64', notify=valueChanged)
     def satsInt(self):
+        if self._amount_sat is None: # should normally be defined when accessing this property
+            self._logger.warning('amount_sat is undefined, returning 0')
+            return 0
         return self._amount_sat
+
+    @satsInt.setter
+    def satsInt(self, sats):
+        if self._amount_sat != sats:
+            self._amount_sat = sats
+            self.valueChanged.emit()
 
     @pyqtProperty('qint64', notify=valueChanged)
     def msatsInt(self):
+        if self._amount_msat is None: # should normally be defined when accessing this property
+            self._logger.warning('amount_msat is undefined, returning 0')
+            return 0
         return self._amount_msat
+
+    @msatsInt.setter
+    def msatsInt(self, msats):
+        if self._amount_msat != msats:
+            self._amount_msat = msats
+            self.valueChanged.emit()
 
     @pyqtProperty(str, notify=valueChanged)
     def satsStr(self):
@@ -49,9 +67,20 @@ class QEAmount(QObject):
     def isMax(self):
         return self._is_max
 
+    @isMax.setter
+    def isMax(self, ismax):
+        if self._is_max != ismax:
+            self._is_max = ismax
+            self.valueChanged.emit()
+
     @pyqtProperty(bool, notify=valueChanged)
     def isEmpty(self):
         return not(self._is_max or self._amount_sat or self._amount_msat)
+
+    def copyFrom(self, amount):
+        self.satsInt = amount.satsInt
+        self.msatsInt = amount.msatsInt
+        self.isMax = amount.isMax
 
     def __eq__(self, other):
         if isinstance(other, QEAmount):

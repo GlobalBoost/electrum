@@ -630,7 +630,6 @@ class LNWallet(LNWorker):
         self.payment_info = self.db.get_dict('lightning_payments')     # RHASH -> amount, direction, is_paid
         self.preimages = self.db.get_dict('lightning_preimages')   # RHASH -> preimage
         # note: this sweep_address is only used as fallback; as it might result in address-reuse
-        self.sweep_address = wallet.get_new_sweep_address_for_channel()
         self.logs = defaultdict(list)  # type: Dict[str, List[HtlcLog]]  # key is RHASH  # (not persisted)
         # used in tests
         self.enable_htlc_settle = True
@@ -640,14 +639,14 @@ class LNWallet(LNWorker):
         self._channels = {}  # type: Dict[bytes, Channel]
         channels = self.db.get_dict("channels")
         for channel_id, c in random_shuffled_copy(channels.items()):
-            self._channels[bfh(channel_id)] = Channel(c, sweep_address=self.sweep_address, lnworker=self)
+            self._channels[bfh(channel_id)] = Channel(c, lnworker=self)
 
         self._channel_backups = {}  # type: Dict[bytes, ChannelBackup]
         # order is important: imported should overwrite onchain
         for name in ["onchain_channel_backups", "imported_channel_backups"]:
             channel_backups = self.db.get_dict(name)
             for channel_id, storage in channel_backups.items():
-                self._channel_backups[bfh(channel_id)] = ChannelBackup(storage, sweep_address=self.sweep_address, lnworker=self)
+                self._channel_backups[bfh(channel_id)] = ChannelBackup(storage, lnworker=self)
 
         self.sent_htlcs = defaultdict(asyncio.Queue)  # type: Dict[bytes, asyncio.Queue[HtlcLog]]
         self.sent_htlcs_info = dict()                 # (RHASH, scid, htlc_id) -> route, payment_secret, amount_msat, bucket_msat, trampoline_fee_level
@@ -758,9 +757,11 @@ class LNWallet(LNWorker):
         self.lnrater = LNRater(self, network)
 
         for chan in self.channels.values():
-            self.lnwatcher.add_channel(chan.funding_outpoint.to_str(), chan.get_funding_address())
+            if not chan.is_redeemed():
+                self.lnwatcher.add_channel(chan.funding_outpoint.to_str(), chan.get_funding_address())
         for cb in self.channel_backups.values():
-            self.lnwatcher.add_channel(cb.funding_outpoint.to_str(), cb.get_funding_address())
+            if not cb.is_redeemed():
+                self.lnwatcher.add_channel(cb.funding_outpoint.to_str(), cb.get_funding_address())
 
         for coro in [
                 self.maybe_listen(),
@@ -2500,7 +2501,7 @@ class LNWallet(LNWorker):
         d = self.db.get_dict("imported_channel_backups")
         d[channel_id.hex()] = cb_storage
         with self.lock:
-            cb = ChannelBackup(cb_storage, sweep_address=self.sweep_address, lnworker=self)
+            cb = ChannelBackup(cb_storage, lnworker=self)
             self._channel_backups[channel_id] = cb
         self.wallet.save_db()
         util.trigger_callback('channels_updated', self.wallet)
@@ -2614,7 +2615,7 @@ class LNWallet(LNWorker):
         self.logger.info(f"adding backup from tx")
         d = self.db.get_dict("onchain_channel_backups")
         d[channel_id] = cb_storage
-        cb = ChannelBackup(cb_storage, sweep_address=self.sweep_address, lnworker=self)
+        cb = ChannelBackup(cb_storage, lnworker=self)
         self.wallet.save_db()
         with self.lock:
             self._channel_backups[bfh(channel_id)] = cb

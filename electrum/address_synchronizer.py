@@ -42,6 +42,7 @@ from .util import EventListener, event_listener
 if TYPE_CHECKING:
     from .network import Network
     from .wallet_db import WalletDB
+    from .simple_config import SimpleConfig
 
 
 TX_HEIGHT_FUTURE = -3
@@ -66,9 +67,10 @@ class AddressSynchronizer(Logger, EventListener):
     synchronizer: Optional['Synchronizer']
     verifier: Optional['SPV']
 
-    def __init__(self, db: 'WalletDB', config):
+    def __init__(self, db: 'WalletDB', config: 'SimpleConfig', *, name: str = None):
         self.db = db
         self.config = config
+        self.name = name
         self.network = None
         Logger.__init__(self)
         # verifier (SPV) and synchronizer are started in start_network
@@ -90,6 +92,9 @@ class AddressSynchronizer(Logger, EventListener):
         self._get_balance_cache = {}
 
         self.load_and_cleanup()
+
+    def diagnostic_name(self):
+        return self.name or ""
 
     def with_transaction_lock(func):
         def func_wrapper(self: 'AddressSynchronizer', *args, **kwargs):
@@ -242,7 +247,7 @@ class AddressSynchronizer(Logger, EventListener):
     def get_transaction(self, txid: str) -> Transaction:
         return self.db.get_transaction(txid)
 
-    def add_transaction(self, tx: Transaction, *, allow_unrelated=False, notify_GUI=True) -> bool:
+    def add_transaction(self, tx: Transaction, *, allow_unrelated=False, is_new=True) -> bool:
         """
         Returns whether the tx was successfully added to the wallet history.
         Note that a transaction may need to be added several times, if our
@@ -337,7 +342,8 @@ class AddressSynchronizer(Logger, EventListener):
             # save
             self.db.add_transaction(tx_hash, tx)
             self.db.add_num_inputs_to_tx(tx_hash, len(tx.inputs()))
-            util.trigger_callback('adb_added_tx', self, tx_hash, notify_GUI)
+            if is_new:
+                util.trigger_callback('adb_added_tx', self, tx_hash)
             return True
 
     def remove_transaction(self, tx_hash: str) -> None:
@@ -424,7 +430,7 @@ class AddressSynchronizer(Logger, EventListener):
             tx = self.db.get_transaction(tx_hash)
             if tx is None:
                 continue
-            self.add_transaction(tx, allow_unrelated=True, notify_GUI=False)
+            self.add_transaction(tx, allow_unrelated=True, is_new=False)
 
         # Store fees
         for tx_hash, fee_sat in tx_fees.items():

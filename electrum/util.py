@@ -1113,6 +1113,10 @@ def is_uri(data: str) -> bool:
     return False
 
 
+class FailedToParsePaymentIdentifier(Exception):
+    pass
+
+
 # Python bug (http://bugs.python.org/issue1927) causes raw_input
 # to be redirected improperly between stdin/stderr on Unix systems
 #TODO: py3
@@ -1185,6 +1189,7 @@ def read_json_file(path):
         raise FileImportFailed(e)
     return data
 
+
 def write_json_file(path, data):
     try:
         with open(path, 'w+', encoding='utf-8') as f:
@@ -1194,13 +1199,36 @@ def write_json_file(path, data):
         raise FileExportFailed(e)
 
 
+def os_chmod(path, mode):
+    """os.chmod aware of tmpfs"""
+    try:
+        os.chmod(path, mode)
+    except OSError as e:
+        xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR", None)
+        if xdg_runtime_dir and is_subpath(path, xdg_runtime_dir):
+            _logger.info(f"Tried to chmod in tmpfs. Skipping... {e!r}")
+        else:
+            raise
+
+
 def make_dir(path, allow_symlink=True):
     """Make directory if it does not yet exist."""
     if not os.path.exists(path):
         if not allow_symlink and os.path.islink(path):
             raise Exception('Dangling link: ' + path)
         os.mkdir(path)
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        os_chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+
+
+def is_subpath(long_path: str, short_path: str) -> bool:
+    """Returns whether long_path is a sub-path of short_path."""
+    try:
+        common = os.path.commonpath([long_path, short_path])
+    except ValueError:
+        return False
+    short_path = standardize_path(short_path)
+    common     = standardize_path(common)
+    return short_path == common
 
 
 def log_exceptions(func):
@@ -1298,6 +1326,7 @@ class OldTaskGroup(aiorpcx.TaskGroup):
         await group.spawn(task1())
         await group.spawn(task2())
     ```
+    # TODO see if we can migrate to asyncio.timeout, introduced in python 3.11, and use stdlib instead of aiorpcx.curio...
     """
     async def join(self):
         if self._wait is all:
@@ -1334,6 +1363,7 @@ class OldTaskGroup(aiorpcx.TaskGroup):
 # see https://github.com/kyuupichan/aiorpcX/issues/44
 # see https://github.com/aio-libs/async-timeout/issues/229
 # see https://bugs.python.org/issue42130 and https://bugs.python.org/issue45098
+# TODO see if we can migrate to asyncio.timeout, introduced in python 3.11, and use stdlib instead of aiorpcx.curio...
 def _aiorpcx_monkeypatched_set_new_deadline(task, deadline):
     def timeout_task():
         task._orig_cancel()
@@ -1347,7 +1377,26 @@ def _aiorpcx_monkeypatched_set_new_deadline(task, deadline):
         task.cancel = mycancel
     task._deadline_handle = task._loop.call_at(deadline, timeout_task)
 
-aiorpcx.curio._set_new_deadline = _aiorpcx_monkeypatched_set_new_deadline
+
+def _aiorpcx_monkeypatched_set_task_deadline(task, deadline):
+    ret = _aiorpcx_orig_set_task_deadline(task, deadline)
+    task._externally_cancelled = None
+    return ret
+
+
+def _aiorpcx_monkeypatched_unset_task_deadline(task):
+    if hasattr(task, "_orig_cancel"):
+        task.cancel = task._orig_cancel
+        del task._orig_cancel
+    return _aiorpcx_orig_unset_task_deadline(task)
+
+
+_aiorpcx_orig_set_task_deadline    = aiorpcx.curio._set_task_deadline
+_aiorpcx_orig_unset_task_deadline  = aiorpcx.curio._unset_task_deadline
+
+aiorpcx.curio._set_new_deadline    = _aiorpcx_monkeypatched_set_new_deadline
+aiorpcx.curio._set_task_deadline   = _aiorpcx_monkeypatched_set_task_deadline
+aiorpcx.curio._unset_task_deadline = _aiorpcx_monkeypatched_unset_task_deadline
 
 
 class NetworkJobOnDefaultServer(Logger, ABC):
