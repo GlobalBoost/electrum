@@ -17,6 +17,8 @@ ElDialog {
     property string _bip21uri
     property string _address
 
+    property bool _render_qr: false // delay qr rendering until dialog is shown
+
     parent: Overlay.overlay
     modal: true
     standardButtons: Dialog.Close
@@ -26,20 +28,6 @@ ElDialog {
 
     Overlay.modal: Rectangle {
         color: "#aa000000"
-    }
-
-    header: RowLayout {
-        width: dialog.width
-        Label {
-            Layout.fillWidth: true
-            text: dialog.title
-            visible: dialog.title
-            elide: Label.ElideRight
-            padding: constants.paddingXLarge
-            bottomPadding: 0
-            font.bold: true
-            font.pixelSize: constants.fontSizeMedium
-        }
     }
 
     Flickable {
@@ -91,18 +79,21 @@ ElDialog {
                         id: qri_bolt11
                         QRImage {
                             qrdata: _bolt11
+                            render: _render_qr
                         }
                     }
                     Component {
                         id: qri_bip21uri
                         QRImage {
                             qrdata: _bip21uri
+                            render: _render_qr
                         }
                     }
                     Component {
                         id: qri_address
                         QRImage {
                             qrdata: _address
+                            render: _render_qr
                         }
                     }
                 }
@@ -297,5 +288,15 @@ ElDialog {
         id: request
         wallet: Daemon.currentWallet
         key: dialog.key
+    }
+
+    // hack. delay qr rendering until dialog is shown
+    Connections {
+        target: dialog.enter
+        function onRunningChanged() {
+            if (!dialog.enter.running) {
+                dialog._render_qr = true
+            }
+        }
     }
 }

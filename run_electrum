@@ -328,7 +328,7 @@ def main():
             'verbosity': '*' if util.is_android_debug_apk() else '',
             'cmd': 'gui',
             'gui': android_gui,
-            'single_password':True,
+            'single_password': True,
         }
         if util.get_android_package_name() == "org.electrum.testnet.electrum":
             # ~hack for easier testnet builds. pkgname subject to change.

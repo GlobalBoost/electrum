@@ -7,6 +7,7 @@ from electrum.logging import get_logger
 from electrum.util import Satoshis, format_time
 from electrum.invoices import Invoice
 
+from .util import QtEventListener, qt_event_listener
 from .qetypes import QEAmount
 
 class QEAbstractInvoiceListModel(QAbstractListModel):
@@ -52,7 +53,6 @@ class QEAbstractInvoiceListModel(QAbstractListModel):
         invoices = []
         for invoice in self.get_invoice_list():
             item = self.invoice_to_model(invoice)
-            #self._logger.debug(str(item))
             invoices.append(item)
 
         self.clear()
@@ -67,6 +67,10 @@ class QEAbstractInvoiceListModel(QAbstractListModel):
         self.beginInsertRows(QModelIndex(), 0, 0)
         self.invoices.insert(0, item)
         self.endInsertRows()
+
+    @pyqtSlot(str)
+    def addInvoice(self, key):
+        self.add_invoice(self.get_invoice_for_key(key))
 
     def delete_invoice(self, key: str):
         i = 0
@@ -124,11 +128,22 @@ class QEAbstractInvoiceListModel(QAbstractListModel):
         raise Exception('provide impl')
 
 
-class QEInvoiceListModel(QEAbstractInvoiceListModel):
+class QEInvoiceListModel(QEAbstractInvoiceListModel, QtEventListener):
     def __init__(self, wallet, parent=None):
         super().__init__(wallet, parent)
+        self.register_callbacks()
+        self.destroyed.connect(lambda: self.on_destroy())
 
     _logger = get_logger(__name__)
+
+    def on_destroy(self):
+        self.unregister_callbacks()
+
+    @qt_event_listener
+    def on_event_invoice_status(self, wallet, key, status):
+        if wallet == self.wallet:
+            self._logger.debug(f'invoice status update for key {key} to {status}')
+            self.updateInvoice(key, status)
 
     def invoice_to_model(self, invoice: Invoice):
         item = super().invoice_to_model(invoice)
@@ -146,16 +161,27 @@ class QEInvoiceListModel(QEAbstractInvoiceListModel):
     def get_invoice_as_dict(self, invoice: Invoice):
         return self.wallet.export_invoice(invoice)
 
-class QERequestListModel(QEAbstractInvoiceListModel):
+class QERequestListModel(QEAbstractInvoiceListModel, QtEventListener):
     def __init__(self, wallet, parent=None):
         super().__init__(wallet, parent)
+        self.register_callbacks()
+        self.destroyed.connect(lambda: self.on_destroy())
 
     _logger = get_logger(__name__)
+
+    def on_destroy(self):
+        self.unregister_callbacks()
+
+    @qt_event_listener
+    def on_event_request_status(self, wallet, key, status):
+        if wallet == self.wallet:
+            self._logger.debug(f'request status update for key {key} to {status}')
+            self.updateRequest(key, status)
 
     def invoice_to_model(self, invoice: Invoice):
         item = super().invoice_to_model(invoice)
         item['type'] = 'request'
-        item['key'] = invoice.get_id() if invoice.is_lightning() else invoice.get_address()
+        item['key'] = invoice.get_id()
 
         return item
 

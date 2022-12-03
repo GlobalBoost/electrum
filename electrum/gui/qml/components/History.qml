@@ -14,14 +14,35 @@ Pane {
     padding: 0
     clip: true
 
+    background: Rectangle {
+        color: constants.darkerBackground
+    }
+
     ListView {
         id: listview
         width: parent.width
         height: parent.height
+        boundsBehavior: Flickable.StopAtBounds
 
         model: visualModel
 
+        header: Item {
+            width: parent.width
+            height: headerLayout.height
+            ColumnLayout {
+                id: headerLayout
+                anchors.centerIn: parent
+                BalanceSummary {
+                    Layout.topMargin: constants.paddingXLarge
+                    Layout.bottomMargin: constants.paddingXLarge
+                }
+            }
+        }
+        headerPositioning: ListView.InlineHeader
+
         readonly property variant sectionLabels: {
+            'local': qsTr('Local'),
+            'mempool': qsTr('Mempool'),
             'today': qsTr('Today'),
             'yesterday': qsTr('Yesterday'),
             'lastweek': qsTr('Last week'),
@@ -61,6 +82,48 @@ Pane {
 
         ScrollIndicator.vertical: ScrollIndicator { }
 
+    }
+
+    MouseArea {
+        id: vdragscroll
+        anchors {
+            top: listview.top
+            right: listview.right
+            bottom: listview.bottom
+        }
+        width: constants.paddingXXLarge
+        drag.target: dragb
+        onPressedChanged: if (pressed) {
+            dragb.y = mouseY + listview.y - dragb.height/2
+        }
+    }
+
+    Rectangle {
+        id: dragb
+        anchors.right: vdragscroll.left
+        width: postext.width + constants.paddingXXLarge
+        height: postext.height + constants.paddingXXLarge
+        radius: constants.paddingXSmall
+
+        color: constants.colorAlpha(Material.accentColor, 0.33)
+        border.color: Material.accentColor
+        opacity : vdragscroll.drag.active ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 300 } }
+
+        onYChanged: {
+            if (vdragscroll.drag.active) {
+                listview.contentY =
+                    Math.max(listview.originY,
+                    Math.min(listview.contentHeight - listview.height + listview.originY,
+                        ((y-listview.y)/(listview.height - dragb.height)) * (listview.contentHeight - listview.height + listview.originY) ))
+            }
+        }
+        Label {
+            id: postext
+            anchors.centerIn: parent
+            text: listview.itemAt(0,listview.contentY + (dragb.y + dragb.height/2)).delegateModel.date
+            font.pixelSize: constants.fontSizeLarge
+        }
     }
 
     MouseArea {

@@ -7,13 +7,19 @@ from electrum.logging import get_logger
 from electrum.util import Satoshis, TxMinedInfo
 
 from .qetypes import QEAmount
+from .util import QtEventListener, qt_event_listener
 
-class QETransactionListModel(QAbstractListModel):
+class QETransactionListModel(QAbstractListModel, QtEventListener):
     def __init__(self, wallet, parent=None, *, onchain_domain=None, include_lightning=True):
         super().__init__(parent)
         self.wallet = wallet
         self.onchain_domain = onchain_domain
         self.include_lightning = include_lightning
+
+        self.register_callbacks()
+        self.destroyed.connect(lambda: self.on_destroy())
+        self.requestRefresh.connect(lambda: self.init_model())
+
         self.init_model()
 
     _logger = get_logger(__name__)
@@ -25,6 +31,17 @@ class QETransactionListModel(QAbstractListModel):
     _ROLE_KEYS = range(Qt.UserRole, Qt.UserRole + len(_ROLE_NAMES))
     _ROLE_MAP  = dict(zip(_ROLE_KEYS, [bytearray(x.encode()) for x in _ROLE_NAMES]))
     _ROLE_RMAP = dict(zip(_ROLE_NAMES, _ROLE_KEYS))
+
+    requestRefresh = pyqtSignal()
+
+    def on_destroy(self):
+        self.unregister_callbacks()
+
+    @qt_event_listener
+    def on_event_verified(self, wallet, txid, info):
+        if wallet == self.wallet:
+            self._logger.debug('verified event for txid %s' % txid)
+            self.on_tx_verified(txid, info)
 
     def rowCount(self, index):
         return len(self.tx_history)
@@ -59,7 +76,7 @@ class QETransactionListModel(QAbstractListModel):
 
         item['key'] = item['txid'] if 'txid' in item else item['payment_hash']
 
-        if not 'lightning' in item:
+        if 'lightning' not in item:
             item['lightning'] = False
 
         if item['lightning']:
@@ -72,34 +89,34 @@ class QETransactionListModel(QAbstractListModel):
             item['value'] = QEAmount(amount_sat=item['value'].value)
             item['balance'] = QEAmount(amount_sat=item['balance'].value)
 
-        # newly arriving txs have no (block) timestamp
-        # TODO?
-        if not item['timestamp']:
-            item['timestamp'] = datetime.timestamp(datetime.now())
-
-        txts = datetime.fromtimestamp(item['timestamp'])
-        today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-
-        if (txts > today):
-            item['section'] = 'today'
-        elif (txts > today - timedelta(days=1)):
-            item['section'] = 'yesterday'
-        elif (txts > today - timedelta(days=7)):
-            item['section'] = 'lastweek'
-        elif (txts > today - timedelta(days=31)):
-            item['section'] = 'lastmonth'
-        else:
-            item['section'] = 'older'
-
-        item['date'] = self.format_date_by_section(item['section'], datetime.fromtimestamp(item['timestamp']))
-
         if 'txid' in item:
             tx = self.wallet.get_input_tx(item['txid'])
             item['complete'] = tx.is_complete()
-        #else:
-            #item['complete'] = True
+
+        # newly arriving txs, or (partially/fully signed) local txs have no (block) timestamp
+        if not item['timestamp']:
+            txinfo = self.wallet.get_tx_info(tx)
+            item['section'] = 'mempool' if item['complete'] and not txinfo.can_broadcast else 'local'
+        else:
+            item['section'] = self.get_section_by_timestamp(item['timestamp'])
+            item['date'] = self.format_date_by_section(item['section'], datetime.fromtimestamp(item['timestamp']))
 
         return item
+
+    def get_section_by_timestamp(self, timestamp):
+        txts = datetime.fromtimestamp(timestamp)
+        today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        if (txts > today):
+            return 'today'
+        elif (txts > today - timedelta(days=1)):
+            return 'yesterday'
+        elif (txts > today - timedelta(days=7)):
+            return 'lastweek'
+        elif (txts > today - timedelta(days=31)):
+            return 'lastmonth'
+        else:
+            return 'older'
 
     def format_date_by_section(self, section, date):
         #TODO: l10n
@@ -117,6 +134,7 @@ class QETransactionListModel(QAbstractListModel):
     # initial model data
     @pyqtSlot()
     def init_model(self):
+        self._logger.debug('retrieving history')
         history = self.wallet.get_full_history(onchain_domain=self.onchain_domain,
                                                include_lightning=self.include_lightning)
         txs = []
@@ -129,16 +147,17 @@ class QETransactionListModel(QAbstractListModel):
         self.tx_history.reverse()
         self.endInsertRows()
 
-    def update_tx(self, txid, info):
+    def on_tx_verified(self, txid, info):
         i = 0
         for tx in self.tx_history:
             if 'txid' in tx and tx['txid'] == txid:
                 tx['height'] = info.height
                 tx['confirmations'] = info.conf
                 tx['timestamp'] = info.timestamp
+                tx['section'] = self.get_section_by_timestamp(info.timestamp)
                 tx['date'] = self.format_date_by_section(tx['section'], datetime.fromtimestamp(info.timestamp))
                 index = self.index(i,0)
-                roles = [self._ROLE_RMAP[x] for x in ['height','confirmations','timestamp','date']]
+                roles = [self._ROLE_RMAP[x] for x in ['section','height','confirmations','timestamp','date']]
                 self.dataChanged.emit(index, index, roles)
                 return
             i = i + 1

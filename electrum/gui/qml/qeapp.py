@@ -3,22 +3,23 @@ import queue
 import time
 import os
 
-from PyQt5.QtCore import pyqtSlot, pyqtSignal, QObject, QUrl, QLocale, qInstallMessageHandler, QTimer
+from PyQt5.QtCore import pyqtSlot, pyqtSignal, pyqtProperty, QObject, QUrl, QLocale, qInstallMessageHandler, QTimer
 from PyQt5.QtGui import QGuiApplication, QFontDatabase
 from PyQt5.QtQml import qmlRegisterType, qmlRegisterUncreatableType, QQmlApplicationEngine
 
-from electrum.logging import Logger, get_logger
 from electrum import version
+from electrum.logging import Logger, get_logger
+from electrum.util import BITCOIN_BIP21_URI_SCHEME, LIGHTNING_URI_SCHEME
 
 from .qeconfig import QEConfig
-from .qedaemon import QEDaemon, QEWalletListModel
+from .qedaemon import QEDaemon
 from .qenetwork import QENetwork
 from .qewallet import QEWallet
 from .qeqr import QEQRParser, QEQRImageProvider, QEQRImageProviderHelper
 from .qewalletdb import QEWalletDB
 from .qebitcoin import QEBitcoin
 from .qefx import QEFX
-from .qetxfinalizer import QETxFinalizer
+from .qetxfinalizer import QETxFinalizer, QETxRbfFeeBumper, QETxCpfpFeeBumper, QETxCanceller
 from .qeinvoice import QEInvoice, QEInvoiceParser, QEUserEnteredPayment
 from .qerequestdetails import QERequestDetails
 from .qetypes import QEAmount
@@ -28,17 +29,22 @@ from .qechannelopener import QEChannelOpener
 from .qelnpaymentdetails import QELnPaymentDetails
 from .qechanneldetails import QEChannelDetails
 from .qeswaphelper import QESwapHelper
+from .qewizard import QENewWalletWizard, QEServerConnectWizard
 
 notification = None
 
 class QEAppController(QObject):
     userNotify = pyqtSignal(str)
+    uriReceived = pyqtSignal(str)
 
-    def __init__(self, qedaemon):
+    _dummy = pyqtSignal()
+
+    def __init__(self, qedaemon, plugins):
         super().__init__()
         self.logger = get_logger(__name__)
 
         self._qedaemon = qedaemon
+        self._plugins = plugins
 
         # set up notification queue and notification_timer
         self.user_notification_queue = queue.Queue()
@@ -52,6 +58,8 @@ class QEAppController(QObject):
         self._qedaemon.walletLoaded.connect(self.on_wallet_loaded)
 
         self.userNotify.connect(self.notifyAndroid)
+
+        self.bindIntent()
 
     def on_wallet_loaded(self):
         qewallet = self._qedaemon.currentWallet
@@ -102,6 +110,23 @@ class QEAppController(QObject):
         except Exception as e:
             self.logger.error(repr(e))
 
+    def bindIntent(self):
+        try:
+            from android import activity
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            mactivity = PythonActivity.mActivity
+            self.on_new_intent(mactivity.getIntent())
+            activity.bind(on_new_intent=self.on_new_intent)
+        except Exception as e:
+            self.logger.error(f'unable to bind intent: {repr(e)}')
+
+    def on_new_intent(self, intent):
+        data = str(intent.getDataString())
+        scheme = str(intent.getScheme()).lower()
+        if scheme == BITCOIN_BIP21_URI_SCHEME or scheme == LIGHTNING_URI_SCHEME:
+            self.uriReceived.emit(data)
+
     @pyqtSlot(str, str)
     def doShare(self, data, title):
         #if platform != 'android':
@@ -131,11 +156,44 @@ class QEAppController(QObject):
     def clipboardToText(self):
         return QGuiApplication.clipboard().text()
 
+    @pyqtSlot(str, result=QObject)
+    def plugin(self, plugin_name):
+        self.logger.debug(f'now {self._plugins.count()} plugins loaded')
+        plugin = self._plugins.get(plugin_name)
+        self.logger.debug(f'plugin with name {plugin_name} is {str(type(plugin))}')
+        if plugin and hasattr(plugin,'so'):
+            return plugin.so
+        else:
+            self.logger.debug('None!')
+            return None
+
+    @pyqtProperty('QVariant', notify=_dummy)
+    def plugins(self):
+        s = []
+        for item in self._plugins.descriptions:
+            self.logger.info(item)
+            s.append({
+                'name': item,
+                'fullname': self._plugins.descriptions[item]['fullname'],
+                'enabled': bool(self._plugins.get(item))
+                })
+
+        self.logger.debug(f'{str(s)}')
+        return s
+
+    @pyqtSlot(str, bool)
+    def setPluginEnabled(self, plugin, enabled):
+        if enabled:
+            self._plugins.enable(plugin)
+        else:
+            self._plugins.disable(plugin)
+
+
 class ElectrumQmlApplication(QGuiApplication):
 
     _valid = True
 
-    def __init__(self, args, config, daemon):
+    def __init__(self, args, config, daemon, plugins):
         super().__init__(args)
 
         self.logger = get_logger(__name__)
@@ -158,11 +216,15 @@ class ElectrumQmlApplication(QGuiApplication):
         qmlRegisterType(QEChannelDetails, 'org.electrum', 1, 0, 'ChannelDetails')
         qmlRegisterType(QESwapHelper, 'org.electrum', 1, 0, 'SwapHelper')
         qmlRegisterType(QERequestDetails, 'org.electrum', 1, 0, 'RequestDetails')
+        qmlRegisterType(QETxRbfFeeBumper, 'org.electrum', 1, 0, 'TxRbfFeeBumper')
+        qmlRegisterType(QETxCpfpFeeBumper, 'org.electrum', 1, 0, 'TxCpfpFeeBumper')
+        qmlRegisterType(QETxCanceller, 'org.electrum', 1, 0, 'TxCanceller')
 
         qmlRegisterUncreatableType(QEAmount, 'org.electrum', 1, 0, 'Amount', 'Amount can only be used as property')
+        qmlRegisterUncreatableType(QENewWalletWizard, 'org.electrum', 1, 0, 'NewWalletWizard', 'NewWalletWizard can only be used as property')
+        qmlRegisterUncreatableType(QEServerConnectWizard, 'org.electrum', 1, 0, 'ServerConnectWizard', 'ServerConnectWizard can only be used as property')
 
         self.engine = QQmlApplicationEngine(parent=self)
-        self.engine.addImportPath('./qml')
 
         screensize = self.primaryScreen().size()
 
@@ -179,15 +241,16 @@ class ElectrumQmlApplication(QGuiApplication):
             self.fixedFont = 'Monospace' # hope for the best
 
         self.context = self.engine.rootContext()
+        self.plugins = plugins
         self._qeconfig = QEConfig(config)
         self._qenetwork = QENetwork(daemon.network, self._qeconfig)
-        self._qedaemon = QEDaemon(daemon)
-        self._appController = QEAppController(self._qedaemon)
+        self.daemon = QEDaemon(daemon)
+        self.appController = QEAppController(self.daemon, self.plugins)
         self._maxAmount = QEAmount(is_max=True)
-        self.context.setContextProperty('AppController', self._appController)
+        self.context.setContextProperty('AppController', self.appController)
         self.context.setContextProperty('Config', self._qeconfig)
         self.context.setContextProperty('Network', self._qenetwork)
-        self.context.setContextProperty('Daemon', self._qedaemon)
+        self.context.setContextProperty('Daemon', self.daemon)
         self.context.setContextProperty('FixedFont', self.fixedFont)
         self.context.setContextProperty('MAX', self._maxAmount)
         self.context.setContextProperty('QRIP', self.qr_ip_h)
@@ -196,6 +259,8 @@ class ElectrumQmlApplication(QGuiApplication):
             'apk_version': version.APK_VERSION,
             'protocol_version': version.PROTOCOL_VERSION
         })
+
+        self.plugins.load_plugin('trustedcoin')
 
         qInstallMessageHandler(self.message_handler)
 

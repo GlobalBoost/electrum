@@ -45,7 +45,7 @@ Item {
                 x: constants.paddingSmall
                 width: delegate.width - 2*constants.paddingSmall
 
-                Item { Layout.columnSpan: 3; Layout.preferredWidth: 1; Layout.preferredHeight: 1}
+                Item { Layout.columnSpan: 3; Layout.preferredWidth: 1; Layout.preferredHeight: constants.paddingSmall }
 
                 Image {
                     readonly property variant tx_icons : [
@@ -64,7 +64,7 @@ Item {
                     Layout.rowSpan: 2
                     source: model.lightning
                         ? "../../../icons/lightning.png"
-                        : model.complete
+                        : model.complete && model.section != 'local'
                             ? tx_icons[Math.min(6,model.confirmations)]
                             : '../../../icons/offline_tx.png'
                 }
@@ -84,7 +84,7 @@ Item {
                     font.pixelSize: constants.fontSizeMedium
                     Layout.alignment: Qt.AlignRight
                     font.bold: true
-                    color: model.incoming ? constants.colorCredit : constants.colorDebit
+                    color: model.value.satsInt >= 0 ? constants.colorCredit : constants.colorDebit
 
                     function updateText() {
                         text = Config.formatSats(model.value)
@@ -93,7 +93,7 @@ Item {
                 }
                 Label {
                     font.pixelSize: constants.fontSizeSmall
-                    text: model.date
+                    text: model.date ? model.date : ''
                     color: constants.mutedForeground
                 }
                 Label {
@@ -113,15 +113,17 @@ Item {
                     }
                     Component.onCompleted: updateText()
                 }
-                Item { Layout.columnSpan: 3; Layout.preferredWidth: 1; Layout.preferredHeight: 1 }
+                Item { Layout.columnSpan: 3; Layout.preferredWidth: 1; Layout.preferredHeight: constants.paddingSmall }
             }
         }
 
         Rectangle {
             visible: delegate.ListView.section == delegate.ListView.nextSection
-            Layout.fillWidth: true
+            // Layout.fillWidth: true
+            Layout.preferredWidth: parent.width * 2/3
+            Layout.alignment: Qt.AlignHCenter
             Layout.preferredHeight: constants.paddingTiny
-            color: Qt.rgba(0,0,0,0.10)
+            color: Material.background //Qt.rgba(0,0,0,0.10)
         }
 
     }

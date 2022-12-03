@@ -2,7 +2,9 @@ import QtQuick 2.6
 import QtQuick.Layouts 1.0
 import QtQuick.Controls 2.1
 
-Dialog {
+import "../controls"
+
+ElDialog {
     id: wizard
     modal: true
     focus: true
@@ -10,8 +12,21 @@ Dialog {
     width: parent.width
     height: parent.height
 
+    title: wizardTitle + (pages.currentItem.title ? ' - ' + pages.currentItem.title : '')
+    iconSource: '../../../icons/electrum.png'
+
+    property string wizardTitle
+
     property var wizard_data
-    property alias pages : pages
+    property alias pages: pages
+    property QtObject wiz
+
+    function doClose() {
+        if (pages.currentIndex == 0)
+            reject()
+        else
+            pages.prev()
+    }
 
     function _setWizardData(wdata) {
         wizard_data = {}
@@ -24,21 +39,43 @@ Dialog {
     // Here we do some manual binding of page.valid -> pages.pagevalid and
     // page.last -> pages.lastpage to propagate the state without the binding
     // going stale.
-    function _loadNextComponent(comp, wdata={}) {
+    function _loadNextComponent(view, wdata={}) {
         // remove any existing pages after current page
         while (pages.contentChildren[pages.currentIndex+1]) {
             pages.takeItem(pages.currentIndex+1).destroy()
         }
 
-        var page = comp.createObject(pages)
+        var url = Qt.resolvedUrl(wiz.viewToComponent(view))
+        var comp = Qt.createComponent(url)
+        if (comp.status == Component.Error) {
+            console.log(comp.errorString())
+            return null
+        }
+
+        // make a deepcopy of wdata and pass it to the component
+        var wdata_copy={}
+        Object.assign(wdata_copy, wdata)
+        var page = comp.createObject(pages, {wizard_data: wdata_copy})
         page.validChanged.connect(function() {
             pages.pagevalid = page.valid
         } )
         page.lastChanged.connect(function() {
             pages.lastpage = page.last
         } )
-        Object.assign(page.wizard_data, wdata) // deep copy
-        page.ready = true // signal page it can access wizard_data
+        page.next.connect(function() {
+            var newview = wiz.submit(page.wizard_data)
+            if (newview.view) {
+                console.log('next view: ' + newview.view)
+                var newpage = _loadNextComponent(newview.view, newview.wizard_data)
+            } else {
+                console.log('END')
+            }
+        })
+        page.prev.connect(function() {
+            var wdata = wiz.prev()
+            console.log('prev view data: ' + JSON.stringify(wdata))
+        })
+
         pages.pagevalid = page.valid
         pages.lastpage = page.last
 
@@ -58,10 +95,12 @@ Dialog {
             clip:true
 
             function prev() {
+                currentItem.prev()
                 currentIndex = currentIndex - 1
                 _setWizardData(pages.contentChildren[currentIndex].wizard_data)
                 pages.pagevalid = pages.contentChildren[currentIndex].valid
                 pages.lastpage = pages.contentChildren[currentIndex].last
+
             }
 
             function next() {
@@ -127,39 +166,6 @@ Dialog {
                 }
 
             }
-        }
-    }
-
-    header: GridLayout {
-        columns: 2
-        rowSpacing: 0
-
-        Image {
-            source: "../../../icons/electrum.png"
-            Layout.preferredWidth: constants.iconSizeXLarge
-            Layout.preferredHeight: constants.iconSizeXLarge
-            Layout.leftMargin: constants.paddingMedium
-            Layout.topMargin: constants.paddingMedium
-            Layout.bottomMargin: constants.paddingMedium
-        }
-
-        Label {
-            text: title
-            elide: Label.ElideRight
-            Layout.fillWidth: true
-            topPadding: constants.paddingXLarge
-            bottomPadding: constants.paddingXLarge
-            font.bold: true
-            font.pixelSize: constants.fontSizeMedium
-        }
-
-        Rectangle {
-            Layout.columnSpan: 2
-            Layout.fillWidth: true
-            Layout.leftMargin: constants.paddingTiny
-            Layout.rightMargin: constants.paddingTiny
-            height: 1
-            color: Qt.rgba(0,0,0,0.5)
         }
     }
 

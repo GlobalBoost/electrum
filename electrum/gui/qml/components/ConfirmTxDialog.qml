@@ -28,6 +28,9 @@ ElDialog {
 
     width: parent.width
     height: parent.height
+    padding: 0
+
+    standardButtons: Dialog.Cancel
 
     modal: true
     parent: Overlay.overlay
@@ -42,220 +45,214 @@ ElDialog {
             : ''
     }
 
-    GridLayout {
-        id: layout
+    ColumnLayout {
         width: parent.width
         height: parent.height
-        columns: 2
+        spacing: 0
 
-        Rectangle {
-            height: 1
-            Layout.fillWidth: true
-            Layout.columnSpan: 2
-            color: Material.accentColor
-        }
-
-        Label {
-            id: amountLabel
-            text: qsTr('Amount to send')
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Label {
-                id: btcValue
-                font.bold: true
-            }
+        GridLayout {
+            width: parent.width
+            columns: 2
+            Layout.leftMargin: constants.paddingLarge
+            Layout.rightMargin: constants.paddingLarge
 
             Label {
-                text: Config.baseUnit
+                id: amountLabel
+                text: qsTr('Amount to send')
                 color: Material.accentColor
             }
 
-            Label {
-                id: fiatValue
+            RowLayout {
                 Layout.fillWidth: true
-                font.pixelSize: constants.fontSizeMedium
-            }
+                Label {
+                    id: btcValue
+                    font.bold: true
+                }
 
-            Component.onCompleted: updateAmountText()
-            Connections {
-                target: finalizer
-                function onEffectiveAmountChanged() {
-                    updateAmountText()
+                Label {
+                    text: Config.baseUnit
+                    color: Material.accentColor
+                }
+
+                Label {
+                    id: fiatValue
+                    Layout.fillWidth: true
+                    font.pixelSize: constants.fontSizeMedium
+                }
+
+                Component.onCompleted: updateAmountText()
+                Connections {
+                    target: finalizer
+                    function onEffectiveAmountChanged() {
+                        updateAmountText()
+                    }
                 }
             }
-        }
-
-        Label {
-            text: qsTr('Mining fee')
-        }
-
-        RowLayout {
-            Label {
-                id: fee
-                text: Config.formatSats(finalizer.fee)
-            }
 
             Label {
-                text: Config.baseUnit
+                text: qsTr('Mining fee')
                 color: Material.accentColor
             }
-        }
 
-        Label {
-            text: qsTr('Fee rate')
-        }
+            RowLayout {
+                Label {
+                    id: fee
+                    text: Config.formatSats(finalizer.fee)
+                }
 
-        RowLayout {
-            Label {
-                id: feeRate
-                text: finalizer.feeRate
-            }
-
-            Label {
-                text: 'sat/vB'
-                color: Material.accentColor
-            }
-        }
-
-        Label {
-            text: qsTr('Target')
-        }
-
-        Label {
-            id: targetdesc
-            text: finalizer.target
-        }
-
-        Slider {
-            id: feeslider
-            snapMode: Slider.SnapOnRelease
-            stepSize: 1
-            from: 0
-            to: finalizer.sliderSteps
-            onValueChanged: {
-                if (activeFocus)
-                    finalizer.sliderPos = value
-            }
-            Component.onCompleted: {
-                value = finalizer.sliderPos
-            }
-            Connections {
-                target: finalizer
-                function onSliderPosChanged() {
-                    feeslider.value = finalizer.sliderPos
+                Label {
+                    text: Config.baseUnit
+                    color: Material.accentColor
                 }
             }
-        }
 
-        ComboBox {
-            id: target
-            textRole: 'text'
-            valueRole: 'value'
-            model: [
-                { text: qsTr('ETA'), value: 1 },
-                { text: qsTr('Mempool'), value: 2 },
-                { text: qsTr('Static'), value: 0 }
-            ]
-            onCurrentValueChanged: {
-                if (activeFocus)
-                    finalizer.method = currentValue
+            Label {
+                visible: !finalizer.extraFee.isEmpty
+                text: qsTr('Extra fee')
+                color: Material.accentColor
             }
-            Component.onCompleted: {
-                currentIndex = indexOfValue(finalizer.method)
+
+            RowLayout {
+                visible: !finalizer.extraFee.isEmpty
+                Label {
+                    text: Config.formatSats(finalizer.extraFee)
+                }
+
+                Label {
+                    text: Config.baseUnit
+                    color: Material.accentColor
+                }
             }
-        }
 
-        InfoTextArea {
-            Layout.columnSpan: 2
-            visible: finalizer.warning != ''
-            text: finalizer.warning
-            iconStyle: InfoTextArea.IconStyle.Warn
-        }
+            Label {
+                text: qsTr('Fee rate')
+                color: Material.accentColor
+            }
 
-        CheckBox {
-            id: final_cb
-            text: qsTr('Replace-by-Fee')
-            Layout.columnSpan: 2
-            checked: finalizer.rbf
-            visible: finalizer.canRbf
-        }
+            RowLayout {
+                Label {
+                    id: feeRate
+                    text: finalizer.feeRate
+                }
 
-        Rectangle {
-            height: 1
-            Layout.fillWidth: true
-            Layout.columnSpan: 2
-            color: Material.accentColor
-        }
+                Label {
+                    text: 'sat/vB'
+                    color: Material.accentColor
+                }
+            }
 
-        Label {
-            text: qsTr('Outputs')
-            Layout.columnSpan: 2
-        }
+            Label {
+                text: qsTr('Target')
+                color: Material.accentColor
+            }
 
-        Repeater {
-            model: finalizer.outputs
-            delegate: TextHighlightPane {
+            Label {
+                id: targetdesc
+                text: finalizer.target
+            }
+
+            Slider {
+                id: feeslider
+                leftPadding: constants.paddingMedium
+                snapMode: Slider.SnapOnRelease
+                stepSize: 1
+                from: 0
+                to: finalizer.sliderSteps
+                onValueChanged: {
+                    if (activeFocus)
+                        finalizer.sliderPos = value
+                }
+                Component.onCompleted: {
+                    value = finalizer.sliderPos
+                }
+                Connections {
+                    target: finalizer
+                    function onSliderPosChanged() {
+                        feeslider.value = finalizer.sliderPos
+                    }
+                }
+            }
+
+            FeeMethodComboBox {
+                id: target
+                feeslider: finalizer
+            }
+
+            CheckBox {
+                id: final_cb
+                text: qsTr('Replace-by-Fee')
                 Layout.columnSpan: 2
-                Layout.fillWidth: true
-                padding: 0
-                leftPadding: constants.paddingSmall
-                RowLayout {
-                    width: parent.width
-                    Label {
-                        text: modelData.address
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        font.pixelSize: constants.fontSizeLarge
-                        font.family: FixedFont
-                        color: modelData.is_mine ? constants.colorMine : Material.foreground
-                    }
-                    Label {
-                        text: Config.formatSats(modelData.value_sats)
-                        font.pixelSize: constants.fontSizeMedium
-                        font.family: FixedFont
-                    }
-                    Label {
-                        text: Config.baseUnit
-                        font.pixelSize: constants.fontSizeMedium
-                        color: Material.accentColor
+                checked: finalizer.rbf
+                visible: finalizer.canRbf
+                onCheckedChanged: {
+                    if (activeFocus)
+                        finalizer.rbf = checked
+                }
+            }
+
+            InfoTextArea {
+                Layout.columnSpan: 2
+                Layout.preferredWidth: parent.width * 3/4
+                Layout.alignment: Qt.AlignHCenter
+                visible: finalizer.warning != ''
+                text: finalizer.warning
+                iconStyle: InfoTextArea.IconStyle.Warn
+            }
+
+            Label {
+                text: qsTr('Outputs')
+                Layout.columnSpan: 2
+                color: Material.accentColor
+            }
+
+            Repeater {
+                model: finalizer.outputs
+                delegate: TextHighlightPane {
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    padding: 0
+                    leftPadding: constants.paddingSmall
+                    RowLayout {
+                        width: parent.width
+                        Label {
+                            text: modelData.address
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font.pixelSize: constants.fontSizeLarge
+                            font.family: FixedFont
+                            color: modelData.is_mine ? constants.colorMine : Material.foreground
+                        }
+                        Label {
+                            text: Config.formatSats(modelData.value_sats)
+                            font.pixelSize: constants.fontSizeMedium
+                            font.family: FixedFont
+                        }
+                        Label {
+                            text: Config.baseUnit
+                            font.pixelSize: constants.fontSizeMedium
+                            color: Material.accentColor
+                        }
                     }
                 }
             }
-        }
-
-        Rectangle {
-            height: 1
-            Layout.fillWidth: true
-            Layout.columnSpan: 2
-            color: Material.accentColor
         }
 
         Item { Layout.fillHeight: true; Layout.preferredWidth: 1 }
 
-        RowLayout {
-            Layout.columnSpan: 2
-            Layout.alignment: Qt.AlignHCenter
-
-            Button {
-                text: qsTr('Cancel')
-                onClicked: {
-                    txcancelled()
-                    dialog.close()
-                }
-            }
-
-            Button {
-                id: sendButton
-                text: Daemon.currentWallet.isWatchOnly ? qsTr('Finalize') : qsTr('Pay')
-                enabled: finalizer.valid
-                onClicked: {
-                    txaccepted()
-                    dialog.close()
-                }
+        FlatButton {
+            id: sendButton
+            Layout.fillWidth: true
+            text: (Daemon.currentWallet.isWatchOnly || !Daemon.currentWallet.canSignWithoutCosigner)
+                    ? qsTr('Finalize')
+                    : qsTr('Pay')
+            icon.source: '../../icons/confirmed.png'
+            enabled: finalizer.valid
+            onClicked: {
+                txaccepted()
+                dialog.close()
             }
         }
     }
 
+    onClosed: txcancelled()
 }

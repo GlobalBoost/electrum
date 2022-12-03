@@ -14,6 +14,7 @@ ElDialog {
     height: parent.height
 
     title: qsTr('Lightning Swap')
+    iconSource: Qt.resolvedUrl('../../icons/update.png')
     standardButtons: Dialog.Cancel
 
     modal: true
@@ -22,106 +23,138 @@ ElDialog {
         color: "#aa000000"
     }
 
-    GridLayout {
-        id: layout
+    padding: 0
+
+    ColumnLayout {
         width: parent.width
         height: parent.height
-        columns: 2
+        spacing: 0
 
-        Rectangle {
-            height: 1
-            Layout.fillWidth: true
-            Layout.columnSpan: 2
-            color: Material.accentColor
-        }
+        GridLayout {
+            id: layout
+            columns: 2
+            Layout.preferredWidth: parent.width
+            Layout.leftMargin: constants.paddingLarge
+            Layout.rightMargin: constants.paddingLarge
 
-        Label {
-            text: qsTr('You send')
-            color: Material.accentColor
-        }
-
-        RowLayout {
-            Label {
-                id: tosend
-                text: Config.formatSats(swaphelper.tosend)
-                font.family: FixedFont
-                visible: swaphelper.valid
+            RowLayout {
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                Label {
+                    Layout.preferredWidth: 1
+                    Layout.fillWidth: true
+                    text: qsTr('You send')
+                    color: Material.accentColor
+                }
+                Image {
+                    Layout.preferredWidth: constants.iconSizeSmall
+                    Layout.preferredHeight: constants.iconSizeSmall
+                    source: swaphelper.isReverse ? '../../icons/lightning.png' : '../../icons/bitcoin.png'
+                    visible: swaphelper.valid
+                }
             }
+
+            RowLayout {
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                Label {
+                    id: tosend
+                    text: Config.formatSats(swaphelper.tosend)
+                    font.family: FixedFont
+                    visible: swaphelper.valid
+                }
+                Label {
+                    text: Config.baseUnit
+                    color: Material.accentColor
+                    visible: swaphelper.valid
+                }
+            }
+
+            RowLayout {
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                Label {
+                    Layout.preferredWidth: 1
+                    Layout.fillWidth: true
+                    text: qsTr('You receive')
+                    color: Material.accentColor
+                }
+                Image {
+                    Layout.preferredWidth: constants.iconSizeSmall
+                    Layout.preferredHeight: constants.iconSizeSmall
+                    source: swaphelper.isReverse ? '../../icons/bitcoin.png' : '../../icons/lightning.png'
+                    visible: swaphelper.valid
+                }
+            }
+
+            RowLayout {
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                Label {
+                    id: toreceive
+                    text: Config.formatSats(swaphelper.toreceive)
+                    font.family: FixedFont
+                    visible: swaphelper.valid
+                }
+                Label {
+                    text: Config.baseUnit
+                    color: Material.accentColor
+                    visible: swaphelper.valid
+                }
+            }
+
             Label {
-                text: Config.baseUnit
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                text: qsTr('Server fee')
                 color: Material.accentColor
-                visible: swaphelper.valid
             }
-            Label {
-                text: swaphelper.isReverse ? qsTr('(offchain)') : qsTr('(onchain)')
-                visible: swaphelper.valid
-            }
-        }
 
-        Label {
-            text: qsTr('You receive')
-            color: Material.accentColor
-        }
+            RowLayout {
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                Label {
+                    text: Config.formatSats(swaphelper.serverfee)
+                    font.family: FixedFont
+                }
+                Label {
+                    text: Config.baseUnit
+                    color: Material.accentColor
+                }
+                Label {
+                    text: '(' + swaphelper.serverfeeperc + ')'
+                }
+            }
 
-        RowLayout {
-            Layout.fillWidth: true
             Label {
-                id: toreceive
-                text: Config.formatSats(swaphelper.toreceive)
-                font.family: FixedFont
-                visible: swaphelper.valid
-            }
-            Label {
-                text: Config.baseUnit
-                color: Material.accentColor
-                visible: swaphelper.valid
-            }
-            Label {
-                text: swaphelper.isReverse ? qsTr('(onchain)') : qsTr('(offchain)')
-                visible: swaphelper.valid
-            }
-        }
-
-        Label {
-            text: qsTr('Server fee')
-            color: Material.accentColor
-        }
-
-        RowLayout {
-            Label {
-                text: swaphelper.serverfeeperc
-            }
-            Label {
-                text: Config.formatSats(swaphelper.serverfee)
-                font.family: FixedFont
-            }
-            Label {
-                text: Config.baseUnit
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                text: qsTr('Mining fee')
                 color: Material.accentColor
             }
-        }
 
-        Label {
-            text: qsTr('Mining fee')
-            color: Material.accentColor
-        }
-
-        RowLayout {
-            Label {
-                text: Config.formatSats(swaphelper.miningfee)
-                font.family: FixedFont
-            }
-            Label {
-                text: Config.baseUnit
-                color: Material.accentColor
+            RowLayout {
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
+                Label {
+                    text: Config.formatSats(swaphelper.miningfee)
+                    font.family: FixedFont
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: Config.baseUnit
+                    color: Material.accentColor
+                }
             }
         }
 
         Slider {
             id: swapslider
-            Layout.columnSpan: 2
-            Layout.preferredWidth: 2/3 * layout.width
-            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: constants.paddingLarge
+            Layout.bottomMargin: constants.paddingLarge
+            Layout.leftMargin: constants.paddingXXLarge
+            Layout.rightMargin: constants.paddingXXLarge
+            Layout.fillWidth: true
 
             from: swaphelper.rangeMin
             to: swaphelper.rangeMax
@@ -142,34 +175,31 @@ ElDialog {
         }
 
         InfoTextArea {
-            Layout.columnSpan: 2
+            Layout.leftMargin: constants.paddingXXLarge
+            Layout.rightMargin: constants.paddingXXLarge
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignHCenter
             visible: swaphelper.userinfo != ''
             text: swaphelper.userinfo
         }
 
-        Rectangle {
-            height: 1
-            Layout.fillWidth: true
-            Layout.columnSpan: 2
-            color: Material.accentColor
-        }
+        Item { Layout.fillHeight: true; Layout.preferredWidth: 1 }
 
-        Button {
-            Layout.alignment: Qt.AlignHCenter
+        FlatButton {
             Layout.columnSpan: 2
-            text: qsTr('Ok')
+            Layout.fillWidth: true
+            text: qsTr('Swap')
+            icon.source: '../../icons/status_waiting.png'
             enabled: swaphelper.valid
             onClicked: swaphelper.executeSwap()
         }
-
-        Item { Layout.fillHeight: true; Layout.preferredWidth: 1; Layout.columnSpan: 2 }
     }
 
     SwapHelper {
         id: swaphelper
         wallet: Daemon.currentWallet
         onError: {
-            var dialog = app.messageDialog.createObject(root, {'text': message})
+            var dialog = app.messageDialog.createObject(app, {'text': message})
             dialog.open()
         }
         onConfirm: {

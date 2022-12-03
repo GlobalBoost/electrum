@@ -65,7 +65,7 @@ from .invoices import Invoice
 from . import submarine_swaps
 from . import GuiImportError
 from . import crypto
-
+from . import constants
 
 if TYPE_CHECKING:
     from .network import Network
@@ -204,6 +204,7 @@ class Commands:
         """ network info """
         net_params = self.network.get_parameters()
         response = {
+            'network': constants.net.NET_NAME,
             'path': self.network.config.path,
             'server': net_params.server.host,
             'blockchain_height': self.network.get_local_height(),
@@ -880,21 +881,27 @@ class Commands:
         return decrypted.decode('utf-8')
 
     @command('w')
-    async def getrequest(self, key, wallet: Abstract_Wallet = None):
-        """Return a payment request"""
-        r = wallet.get_request(key)
+    async def get_request(self, request_id, wallet: Abstract_Wallet = None):
+        """Returns a payment request"""
+        r = wallet.get_request(request_id)
         if not r:
             raise Exception("Request not found")
         return wallet.export_request(r)
+
+    @command('w')
+    async def get_invoice(self, invoice_id, wallet: Abstract_Wallet = None):
+        """Returns an invoice (request for outgoing payment)"""
+        r = wallet.get_invoice(invoice_id)
+        if not r:
+            raise Exception("Request not found")
+        return wallet.export_invoice(r)
 
     #@command('w')
     #async def ackrequest(self, serialized):
     #    """<Not implemented>"""
     #    pass
 
-    @command('w')
-    async def list_requests(self, pending=False, expired=False, paid=False, wallet: Abstract_Wallet = None):
-        """List the payment requests you made."""
+    def _filter_invoices(self, _list, wallet, pending, expired, paid):
         if pending:
             f = PR_UNPAID
         elif expired:
@@ -903,11 +910,23 @@ class Commands:
             f = PR_PAID
         else:
             f = None
-        out = wallet.get_sorted_requests()
         if f is not None:
-            out = [req for req in out
-                   if f == wallet.get_request_status(wallet.get_key_for_receive_request(req))]
-        return [wallet.export_request(x) for x in out]
+            _list = [x for x in _list if f == wallet.get_invoice_status(x)]
+        return _list
+
+    @command('w')
+    async def list_requests(self, pending=False, expired=False, paid=False, wallet: Abstract_Wallet = None):
+        """Returns the list of incoming payment requests saved in the wallet."""
+        l = wallet.get_sorted_requests()
+        l = self._filter_invoices(l, wallet, pending, expired, paid)
+        return [wallet.export_request(x) for x in l]
+
+    @command('w')
+    async def list_invoices(self, pending=False, expired=False, paid=False, wallet: Abstract_Wallet = None):
+        """Returns the list of invoices (requests for outgoing payments) saved in the wallet."""
+        l = wallet.get_invoices()
+        l = self._filter_invoices(l, wallet, pending, expired, paid)
+        return [wallet.export_invoice(x) for x in l]
 
     @command('w')
     async def createnewaddress(self, wallet: Abstract_Wallet = None):
@@ -970,19 +989,15 @@ class Commands:
         wallet.save_db()
         return tx.txid()
 
-    @command('wp')
-    async def signrequest(self, address, password=None, wallet: Abstract_Wallet = None):
-        "Sign payment request with an OpenAlias"
-        alias = self.config.get('alias')
-        if not alias:
-            raise Exception('No alias in your configuration')
-        alias_addr = wallet.contacts.resolve(alias)['address']
-        wallet.sign_payment_request(address, alias, alias_addr, password)
+    @command('w')
+    async def delete_request(self, request_id, wallet: Abstract_Wallet = None):
+        """Remove an incoming payment request"""
+        return wallet.delete_request(request_id)
 
     @command('w')
-    async def delete_request(self, address, wallet: Abstract_Wallet = None):
-        """Remove a payment request"""
-        return wallet.delete_request(address)
+    async def delete_invoice(self, invoice_id, wallet: Abstract_Wallet = None):
+        """Remove an outgoing payment invoice"""
+        return wallet.delete_invoice(invoice_id)
 
     @command('w')
     async def clear_requests(self, wallet: Abstract_Wallet = None):
@@ -1143,6 +1158,8 @@ class Commands:
                 'remote_pubkey': bh2u(chan.node_id),
                 'local_balance': chan.balance(LOCAL)//1000,
                 'remote_balance': chan.balance(REMOTE)//1000,
+                'local_ctn': chan.get_latest_ctn(LOCAL),
+                'remote_ctn': chan.get_latest_ctn(REMOTE),
                 'local_reserve': chan.config[REMOTE].reserve_sat, # their config has our reserve
                 'remote_reserve': chan.config[LOCAL].reserve_sat,
                 'local_unsettled_sent': chan.balance_tied_up_in_htlcs_by_direction(LOCAL, direction=SENT) // 1000,
@@ -1181,11 +1198,6 @@ class Commands:
     async def reset_liquidity_hints(self):
         if self.network.path_finder:
             self.network.path_finder.liquidity_hints.reset_liquidity_hints()
-
-    @command('w')
-    async def list_invoices(self, wallet: Abstract_Wallet = None):
-        l = wallet.get_invoices()
-        return [wallet.export_invoice(x) for x in l]
 
     @command('wnl')
     async def close_channel(self, channel_point, force=False, wallet: Abstract_Wallet = None):

@@ -189,6 +189,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
         Logger.__init__(self)
 
         self._coroutines_scheduled = {}  # type: Dict[concurrent.futures.Future, str]
+        self._coroutines_scheduled_lock = threading.Lock()
         self.thread = TaskThread(self, self.on_error)
 
         self.tx_notification_queue = queue.Queue()
@@ -310,11 +311,13 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
                 if on_result:
                     on_result(res)
             finally:
-                self._coroutines_scheduled.pop(fut)
+                with self._coroutines_scheduled_lock:
+                    self._coroutines_scheduled.pop(fut)
                 self.need_update.set()
 
         fut = asyncio.run_coroutine_threadsafe(wrapper(), self.network.asyncio_loop)
-        self._coroutines_scheduled[fut] = name
+        with self._coroutines_scheduled_lock:
+            self._coroutines_scheduled[fut] = name
         self.need_update.set()
 
     def on_fx_history(self):
@@ -999,7 +1002,8 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
         if num_tasks == 0:
             name = ''
         elif num_tasks == 1:
-            name = list(self._coroutines_scheduled.values())[0]  + '...'
+            with self._coroutines_scheduled_lock:
+                name = list(self._coroutines_scheduled.values())[0]  + '...'
         else:
             name = "%d"%num_tasks + _('tasks')  + '...'
         self.tasks_label.setText(name)
@@ -1153,13 +1157,9 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
             self.receive_tab.request_list.refresh_item(key)
 
     @qt_event_listener
-    def on_event_invoice_status(self, wallet, key):
+    def on_event_invoice_status(self, wallet, key, status):
         if wallet != self.wallet:
             return
-        invoice = self.wallet.get_invoice(key)
-        if invoice is None:
-            return
-        status = self.wallet.get_invoice_status(invoice)
         if status == PR_PAID:
             self.send_tab.invoice_list.delete_item(key)
         else:
@@ -2494,7 +2494,9 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, Logger, QtEventListener):
         if self.thread:
             self.thread.stop()
             self.thread = None
-        for fut in self._coroutines_scheduled.keys():
+        with self._coroutines_scheduled_lock:
+            coro_keys = list(self._coroutines_scheduled.keys())
+        for fut in coro_keys:
             fut.cancel()
         self.unregister_callbacks()
         self.config.set_key("is_maximized", self.isMaximized())

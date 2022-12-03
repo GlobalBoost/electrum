@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from electrum.logging import get_logger
 from electrum.util import DECIMAL_POINT_DEFAULT, format_satoshis
+from electrum.invoices import PR_DEFAULT_EXPIRATION_WHEN_CREATING
 
 from .qetypes import QEAmount
 from .auth import AuthMixin, auth_protect
@@ -81,6 +82,16 @@ class QEConfig(AuthMixin, QObject):
         self.config.set_key('confirmed_only', not checked, True)
         self.spendUnconfirmedChanged.emit()
 
+    requestExpiryChanged = pyqtSignal()
+    @pyqtProperty(int, notify=requestExpiryChanged)
+    def requestExpiry(self):
+        return self.config.get('request_expiry', PR_DEFAULT_EXPIRATION_WHEN_CREATING)
+
+    @requestExpiry.setter
+    def requestExpiry(self, expiry):
+        self.config.set_key('request_expiry', expiry)
+        self.requestExpiryChanged.emit()
+
     pinCodeChanged = pyqtSignal()
     @pyqtProperty(str, notify=pinCodeChanged)
     def pinCode(self):
@@ -108,6 +119,63 @@ class QEConfig(AuthMixin, QObject):
     def useGossip(self, gossip):
         self.config.set_key('use_gossip', gossip)
         self.useGossipChanged.emit()
+
+    useFallbackAddressChanged = pyqtSignal()
+    @pyqtProperty(bool, notify=useFallbackAddressChanged)
+    def useFallbackAddress(self):
+        return self.config.get('bolt11_fallback', True)
+
+    @useFallbackAddress.setter
+    def useFallbackAddress(self, use_fallback):
+        self.config.set_key('bolt11_fallback', use_fallback)
+        self.useFallbackAddressChanged.emit()
+
+    enableDebugLogsChanged = pyqtSignal()
+    @pyqtProperty(bool, notify=enableDebugLogsChanged)
+    def enableDebugLogs(self):
+        gui_setting = self.config.get('gui_enable_debug_logs', False)
+        return gui_setting or bool(self.config.get('verbosity'))
+
+    @pyqtProperty(bool, notify=enableDebugLogsChanged)
+    def canToggleDebugLogs(self):
+        gui_setting = self.config.get('gui_enable_debug_logs', False)
+        return not self.config.get('verbosity') or gui_setting
+
+    @enableDebugLogs.setter
+    def enableDebugLogs(self, enable):
+        self.config.set_key('gui_enable_debug_logs', enable)
+        self.enableDebugLogsChanged.emit()
+
+    useRbfChanged = pyqtSignal()
+    @pyqtProperty(bool, notify=useRbfChanged)
+    def useRbf(self):
+        return self.config.get('use_rbf', True)
+
+    @useRbf.setter
+    def useRbf(self, useRbf):
+        self.config.set_key('use_rbf', useRbf)
+        self.useRbfChanged.emit()
+
+    useRecoverableChannelsChanged = pyqtSignal()
+    @pyqtProperty(bool, notify=useRecoverableChannelsChanged)
+    def useRecoverableChannels(self):
+        return self.config.get('use_recoverable_channels', True)
+
+    @useRecoverableChannels.setter
+    def useRecoverableChannels(self, useRecoverableChannels):
+        self.config.set_key('use_recoverable_channels', useRecoverableChannels)
+        self.useRecoverableChannelsChanged.emit()
+
+    trustedcoinPrepayChanged = pyqtSignal()
+    @pyqtProperty(int, notify=trustedcoinPrepayChanged)
+    def trustedcoinPrepay(self):
+        return self.config.get('trustedcoin_prepay', 20)
+
+    @trustedcoinPrepay.setter
+    def trustedcoinPrepay(self, num_prepay):
+        if num_prepay != self.config.get('trustedcoin_prepay', 20):
+            self.config.set_key('trustedcoin_prepay', num_prepay)
+            self.trustedcoinPrepayChanged.emit()
 
     @pyqtSlot('qint64', result=str)
     @pyqtSlot('qint64', bool, result=str)

@@ -9,42 +9,36 @@ import "controls"
 
 Pane {
     id: root
-    property string title: qsTr("Lightning Channels")
-
-    property QtObject menu: Menu {
-        id: menu
-        MenuItem {
-            icon.color: 'transparent'
-            action: Action {
-                text: qsTr('Swap');
-                enabled: Daemon.currentWallet.lightningCanSend.satsInt > 0 || Daemon.currentWallet.lightningCanReceive.satInt > 0
-                onTriggered: {
-                    var dialog = swapDialog.createObject(root)
-                    dialog.open()
-                }
-                icon.source: '../../icons/status_waiting.png'
-            }
-        }
-        MenuSeparator {}
-        MenuItem {
-            icon.color: 'transparent'
-            action: Action {
-                text: qsTr('Open Channel');
-                onTriggered: app.stack.push(Qt.resolvedUrl('OpenChannel.qml'))
-                icon.source: '../../icons/lightning.png'
-            }
-        }
-    }
+    padding: 0
 
     ColumnLayout {
         id: layout
         width: parent.width
         height: parent.height
+        spacing: 0
 
         GridLayout {
             id: summaryLayout
             Layout.preferredWidth: parent.width
+            Layout.topMargin: constants.paddingLarge
+            Layout.leftMargin: constants.paddingLarge
+            Layout.rightMargin: constants.paddingLarge
+
             columns: 2
+
+            Label {
+                Layout.columnSpan: 2
+                text: qsTr('Lightning Channels')
+                font.pixelSize: constants.fontSizeLarge
+                color: Material.accentColor
+            }
+
+            Rectangle {
+                Layout.columnSpan: 2
+                Layout.fillWidth: true
+                height: 1
+                color: Material.accentColor
+            }
 
             Label {
                 Layout.columnSpan: 2
@@ -98,8 +92,13 @@ Pane {
 
         Frame {
             id: channelsFrame
-            Layout.preferredWidth: parent.width
+            Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.topMargin: constants.paddingLarge
+            Layout.bottomMargin: constants.paddingLarge
+            Layout.leftMargin: constants.paddingMedium
+            Layout.rightMargin: constants.paddingMedium
+
             verticalPadding: 0
             horizontalPadding: 0
             background: PaneInsetBackground {}
@@ -107,24 +106,6 @@ Pane {
             ColumnLayout {
                 spacing: 0
                 anchors.fill: parent
-
-                Item {
-                    Layout.preferredHeight: hitem.height
-                    Layout.preferredWidth: parent.width
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Qt.lighter(Material.background, 1.25)
-                    }
-                    RowLayout {
-                        id: hitem
-                        width: parent.width
-                        Label {
-                            text: qsTr('Channels')
-                            font.pixelSize: constants.fontSizeLarge
-                            color: Material.accentColor
-                        }
-                    }
-                }
 
                 ListView {
                     id: listview
@@ -144,19 +125,67 @@ Pane {
             }
         }
 
-        RowLayout {
-            Layout.alignment: Qt.AlignHCenter
+
+        FlatButton {
             Layout.fillWidth: true
-            Button {
-                text: qsTr('Open Channel')
-                onClicked: app.stack.push(Qt.resolvedUrl('OpenChannel.qml'))
+            text: qsTr('Swap');
+            visible: Daemon.currentWallet.lightningCanSend.satsInt > 0 || Daemon.currentWallet.lightningCanReceive.satInt > 0
+            icon.source: '../../icons/status_waiting.png'
+            onClicked: {
+                var dialog = swapDialog.createObject(root)
+                dialog.open()
             }
+        }
+
+        FlatButton {
+            Layout.fillWidth: true
+            text: qsTr('Open Channel')
+            onClicked: {
+                var dialog = openChannelDialog.createObject(root)
+                dialog.open()
+            }
+            icon.source: '../../icons/lightning.png'
+        }
+
+        FlatButton {
+            Layout.fillWidth: true
+            text: qsTr('Import channel backup')
+            onClicked: {
+                var dialog = importChannelBackupDialog.createObject(root)
+                dialog.open()
+            }
+            icon.source: '../../icons/file.png'
         }
 
     }
 
+    Connections {
+        target: Daemon.currentWallet
+        function onImportChannelBackupFailed(message) {
+            var dialog = app.messageDialog.createObject(root, { text: message })
+            dialog.open()
+        }
+    }
+
     Component {
         id: swapDialog
-        SwapDialog {}
+        SwapDialog {
+            onClosed: destroy()
+        }
     }
+
+    Component {
+        id: openChannelDialog
+        OpenChannelDialog {
+            onClosed: destroy()
+        }
+    }
+
+    Component {
+        id: importChannelBackupDialog
+        ImportChannelBackupDialog {
+            onClosed: destroy()
+        }
+    }
+
 }

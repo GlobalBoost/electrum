@@ -31,10 +31,6 @@ if TYPE_CHECKING:
 
 from .qeapp import ElectrumQmlApplication
 
-class UncaughtException(Exception):
-    pass
-
-
 class ElectrumGui(Logger):
 
     @profiler
@@ -56,14 +52,14 @@ class ElectrumGui(Logger):
         if hasattr(QGuiApplication, 'setDesktopFileName'):
             QGuiApplication.setDesktopFileName('electrum.desktop')
         if hasattr(QtCore.Qt, "AA_EnableHighDpiScaling"):
-            QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling);
+            QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling)
 
-        if not "QT_QUICK_CONTROLS_STYLE" in os.environ:
+        if "QT_QUICK_CONTROLS_STYLE" not in os.environ:
             os.environ["QT_QUICK_CONTROLS_STYLE"] = "Material"
 
         self.gui_thread = threading.current_thread()
         self.plugins = plugins
-        self.app = ElectrumQmlApplication(sys.argv, config, daemon)
+        self.app = ElectrumQmlApplication(sys.argv, config, daemon, plugins)
         # timer
         self.timer = QTimer(self.app)
         self.timer.setSingleShot(False)

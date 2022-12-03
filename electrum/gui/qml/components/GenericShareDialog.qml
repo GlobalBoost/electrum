@@ -14,6 +14,7 @@ ElDialog {
     property string text_help
 
     title: ''
+
     parent: Overlay.overlay
     modal: true
     standardButtons: Dialog.Close
@@ -23,20 +24,6 @@ ElDialog {
 
     Overlay.modal: Rectangle {
         color: "#aa000000"
-    }
-
-    header: RowLayout {
-        width: dialog.width
-        Label {
-            Layout.fillWidth: true
-            text: dialog.title
-            visible: dialog.title
-            elide: Label.ElideRight
-            padding: constants.paddingXLarge
-            bottomPadding: 0
-            font.bold: true
-            font.pixelSize: constants.fontSizeMedium
-        }
     }
 
     Flickable {
@@ -50,23 +37,13 @@ ElDialog {
             width: parent.width
             spacing: constants.paddingMedium
 
-            Rectangle {
-                height: 1
-                Layout.fillWidth: true
-                color: Material.accentColor
-            }
-
             QRImage {
                 id: qr
+                render: dialog.enter ? false : true
+                qrdata: dialog.text_qr ? dialog.text_qr : dialog.text
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: constants.paddingSmall
                 Layout.bottomMargin: constants.paddingSmall
-            }
-
-            Rectangle {
-                height: 1
-                Layout.fillWidth: true
-                color: Material.accentColor
             }
 
             TextHighlightPane {
@@ -89,15 +66,23 @@ ElDialog {
                 Layout.fillWidth: true
             }
 
+            Rectangle {
+                height: 1
+                Layout.preferredWidth: qr.width
+                Layout.alignment: Qt.AlignHCenter
+                color: Material.accentColor
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignHCenter
-                Button {
+
+                FlatButton {
                     text: qsTr('Copy')
                     icon.source: '../../icons/copy_bw.png'
                     onClicked: AppController.textToClipboard(dialog.text)
                 }
-                Button {
+                FlatButton {
                     text: qsTr('Share')
                     icon.source: '../../icons/share.png'
                     onClicked: {
@@ -108,7 +93,12 @@ ElDialog {
         }
     }
 
-    Component.onCompleted: {
-        qr.qrdata = dialog.text_qr ? dialog.text_qr : dialog.text
+    Connections {
+        target: dialog.enter
+        function onRunningChanged() {
+            if (!dialog.enter.running) {
+                qr.render = true
+            }
+        }
     }
 }
