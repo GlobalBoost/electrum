@@ -107,14 +107,8 @@ class QEWalletListModel(QAbstractListModel):
             i += 1
 
 class QEDaemon(AuthMixin, QObject):
-    def __init__(self, daemon, parent=None):
-        super().__init__(parent)
-        self.daemon = daemon
-        self.qefx = QEFX(daemon.fx, daemon.config)
-        self._walletdb = QEWalletDB()
-        self._walletdb.validPasswordChanged.connect(self.passwordValidityCheck)
-
     _logger = get_logger(__name__)
+
     _available_wallets = None
     _current_wallet = None
     _new_wallet_wizard = None
@@ -132,6 +126,13 @@ class QEDaemon(AuthMixin, QObject):
     walletRequiresPassword = pyqtSignal()
     walletOpenError = pyqtSignal([str], arguments=["error"])
     walletDeleteError = pyqtSignal([str,str], arguments=['code', 'message'])
+
+    def __init__(self, daemon, parent=None):
+        super().__init__(parent)
+        self.daemon = daemon
+        self.qefx = QEFX(daemon.fx, daemon.config)
+        self._walletdb = QEWalletDB()
+        self._walletdb.validPasswordChanged.connect(self.passwordValidityCheck)
 
     @pyqtSlot()
     def passwordValidityCheck(self):
@@ -199,7 +200,7 @@ class QEDaemon(AuthMixin, QObject):
     def checkThenDeleteWallet(self, wallet, confirm_requests=False, confirm_balance=False):
         if wallet.wallet.lnworker:
             lnchannels = wallet.wallet.lnworker.get_channel_objects()
-            if any([channel.get_state() != ChannelState.REDEEMED for channel in lnchannels.values()]):
+            if any([channel.get_state() != ChannelState.REDEEMED and not channel.is_backup() for channel in lnchannels.values()]):
                 self.walletDeleteError.emit('unclosed_channels', _('There are still channels that are not fully closed'))
                 return
 

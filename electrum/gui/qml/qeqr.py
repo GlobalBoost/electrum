@@ -15,21 +15,22 @@ from electrum.i18n import _
 from electrum.util import profiler, get_asyncio_loop
 
 class QEQRParser(QObject):
-    def __init__(self, text=None, parent=None):
-        super().__init__(parent)
-        self._text = text
-        self.qrreader = get_qr_reader()
-        if not self.qrreader:
-            raise Exception(_("The platform QR detection library is not available."))
-
     _logger = get_logger(__name__)
 
     busyChanged = pyqtSignal()
     dataChanged = pyqtSignal()
     imageChanged = pyqtSignal()
 
-    _busy = False
-    _image = None
+    def __init__(self, text=None, parent=None):
+        super().__init__(parent)
+
+        self._busy = False
+        self._image = None
+
+        self._text = text
+        self.qrreader = get_qr_reader()
+        if not self.qrreader:
+            raise Exception(_("The platform QR detection library is not available."))
 
     @pyqtSlot('QImage')
     def scanImage(self, image=None):
@@ -126,9 +127,11 @@ class QEQRImageProvider(QQuickImageProvider):
     def requestImage(self, qstr, size):
         # Qt does a urldecode before passing the string here
         # but BIP21 (and likely other uri based specs) requires urlencoding,
-        # so we re-encode percent-quoted if a 'scheme' is found in the string
+        # so we re-encode percent-quoted if a known 'scheme' is found in the string
+        # (unknown schemes might be found when a colon is in a serialized TX, which
+        # leads to mangling of the tx, so we check for supported schemes.)
         uri = urllib.parse.urlparse(qstr)
-        if uri.scheme:
+        if uri.scheme and uri.scheme in ['bitcoin', 'lightning']:
             # urlencode request parameters
             query = urllib.parse.parse_qs(uri.query)
             query = urllib.parse.urlencode(query, doseq=True, quote_via=urllib.parse.quote)

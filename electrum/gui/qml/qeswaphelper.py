@@ -18,28 +18,30 @@ from .qewallet import QEWallet
 class QESwapHelper(AuthMixin, QObject):
     _logger = get_logger(__name__)
 
-    _wallet = None
-    _sliderPos = 0
-    _rangeMin = 0
-    _rangeMax = 0
-    _tx = None
-    _valid = False
-    _userinfo = ''
-    _tosend = QEAmount()
-    _toreceive = QEAmount()
-    _serverfeeperc = ''
-    _serverfee = QEAmount()
-    _miningfee = QEAmount()
-    _isReverse = False
-
-    _send_amount = 0
-    _receive_amount = 0
-
     error = pyqtSignal([str], arguments=['message'])
     confirm = pyqtSignal([str], arguments=['message'])
+    swapStarted = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self._wallet = None
+        self._sliderPos = 0
+        self._rangeMin = 0
+        self._rangeMax = 0
+        self._tx = None
+        self._valid = False
+        self._userinfo = ''
+        self._tosend = QEAmount()
+        self._toreceive = QEAmount()
+        self._serverfeeperc = ''
+        self._serverfee = QEAmount()
+        self._miningfee = QEAmount()
+        self._isReverse = False
+
+        self._service_available = False
+        self._send_amount = 0
+        self._receive_amount = 0
 
     walletChanged = pyqtSignal()
     @pyqtProperty(QEWallet, notify=walletChanged)
@@ -179,7 +181,14 @@ class QESwapHelper(AuthMixin, QObject):
     def init_swap_slider_range(self):
         lnworker = self._wallet.wallet.lnworker
         swap_manager = lnworker.swap_manager
-        asyncio.run(swap_manager.get_pairs())
+        try:
+            asyncio.run(swap_manager.get_pairs())
+            self._service_available = True
+        except Exception as e:
+            self.error.emit(_('Swap service unavailable'))
+            self._logger.error(f'could not get pairs for swap: {repr(e)}')
+            return
+
         """Sets the minimal and maximal amount that can be swapped for the swap
         slider."""
         # tx is updated again afterwards with send_amount in case of normal swap
@@ -223,6 +232,9 @@ class QESwapHelper(AuthMixin, QObject):
             self.valid = False
 
     def swap_slider_moved(self):
+        if not self._service_available:
+            return
+
         position = int(self._sliderPos)
 
         swap_manager = self._wallet.wallet.lnworker.swap_manager
@@ -344,3 +356,4 @@ class QESwapHelper(AuthMixin, QObject):
             lightning_amount = self._receive_amount
             onchain_amount = self._send_amount
             self.do_normal_swap(lightning_amount, onchain_amount)
+        self.swapStarted.emit()

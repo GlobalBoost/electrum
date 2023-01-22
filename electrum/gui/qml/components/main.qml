@@ -11,7 +11,8 @@ import "controls"
 ApplicationWindow
 {
     id: app
-    visible: true
+
+    visible: false // initial value
 
     // dimensions ignored on android
     width: 480
@@ -34,36 +35,37 @@ ApplicationWindow
 
         ColumnLayout {
             spacing: 0
+            width: parent.width
+            height: toolbar.height
 
             RowLayout {
                 id: toolbarTopLayout
-                Layout.preferredWidth: app.width
 
-                ToolButton {
-                    text: qsTr("‹")
-                    enabled: stack.depth > 1
-                    onClicked: stack.pop()
-                }
+                Layout.fillWidth: true
+                Layout.rightMargin: constants.paddingMedium
+                Layout.alignment: Qt.AlignVCenter
 
-                Image {
-                    Layout.alignment: Qt.AlignVCenter
-                    Layout.preferredWidth: constants.iconSizeLarge
-                    Layout.preferredHeight: constants.iconSizeLarge
-                    source: "../../icons/electrum.png"
+                Item {
+                    Layout.preferredWidth: constants.paddingXLarge
+                    Layout.preferredHeight: 1
                 }
 
                 Label {
+                    Layout.preferredHeight: Math.max(implicitHeight, toolbarTopLayout.height)
                     text: stack.currentItem.title
                     elide: Label.ElideRight
-                    horizontalAlignment: Qt.AlignHCenter
+                    // horizontalAlignment: Qt.AlignHCenter
                     verticalAlignment: Qt.AlignVCenter
                     Layout.fillWidth: true
                     font.pixelSize: constants.fontSizeMedium
                     font.bold: true
                     MouseArea {
+                        height: toolbarTopLayout.height
                         anchors.fill: parent
-                        // TODO: disable for now
-                        // onClicked: walletSummary.toggle()
+                        onClicked: {
+                            if (stack.currentItem.objectName != 'Wallets')
+                                stack.pushOnRoot(Qt.resolvedUrl('Wallets.qml'))
+                        }
                     }
                 }
 
@@ -99,7 +101,25 @@ ApplicationWindow
                     scale: 1.5
                 }
 
-                NetworkStatusIndicator { }
+                LightningNetworkStatusIndicator {
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            if (stack.currentItem.objectName != 'NetworkOverview')
+                                stack.push(Qt.resolvedUrl('NetworkOverview.qml'))
+                        }
+                    }
+                }
+
+                OnchainNetworkStatusIndicator {
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            if (stack.currentItem.objectName != 'NetworkOverview')
+                                stack.push(Qt.resolvedUrl('NetworkOverview.qml'))
+                        }
+                    }
+                }
 
                 Rectangle {
                     color: 'transparent'
@@ -108,18 +128,6 @@ ApplicationWindow
                     visible: !menuButton.visible
                 }
 
-                ToolButton {
-                    id: menuButton
-                    enabled: stack.currentItem && stack.currentItem.menu ? stack.currentItem.menu.count > 0 : false
-                    text: enabled ? qsTr("≡") : ''
-                    font.pixelSize: constants.fontSizeXLarge
-                    onClicked: {
-                        stack.currentItem.menu.open()
-                        // position the menu to the right
-                        stack.currentItem.menu.x = toolbar.width - stack.currentItem.menu.width
-                        stack.currentItem.menu.y = toolbarTopLayout.height
-                    }
-                }
             }
 
             WalletSummary {
@@ -148,22 +156,28 @@ ApplicationWindow
     }
 
     Timer {
-        id: splashTimer
+        id: coverTimer
         interval: 10
         onTriggered: {
-            splash.opacity = 0
+            app.visible = true
+            cover.opacity = 0
         }
     }
 
-    Splash {
-        id: splash
-        anchors.top: header.top
-        anchors.bottom: app.contentItem.bottom
-        width: app.width
+    Rectangle {
+        id: cover
+        parent: Overlay.overlay
+        anchors.fill: parent
+
         z: 1000
+        color: 'black'
 
         Behavior on opacity {
-            NumberAnimation { duration: 300 }
+            enabled: AppController ? AppController.isAndroid() : false
+            NumberAnimation {
+                duration: 1000
+                easing.type: Easing.OutQuad;
+            }
         }
     }
 
@@ -238,8 +252,13 @@ ApplicationWindow
         id: notificationPopup
     }
 
+    Component {
+        id: crashDialog
+        ExceptionDialog {}
+    }
+
     Component.onCompleted: {
-        splashTimer.start()
+        coverTimer.start()
 
         if (!Config.autoConnectDefined) {
             var dialog = serverConnectWizard.createObject(app)
@@ -327,6 +346,12 @@ ApplicationWindow
         target: AppController
         function onUserNotify(message) {
             notificationPopup.show(message)
+        }
+        function onShowException() {
+            var dialog = crashDialog.createObject(app, {
+                crashData: AppController.crashData()
+            })
+            dialog.open()
         }
     }
 

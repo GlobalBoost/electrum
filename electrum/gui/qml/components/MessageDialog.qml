@@ -8,15 +8,19 @@ import "controls"
 ElDialog {
     id: dialog
     title: qsTr("Message")
+    iconSource: yesno
+        ? Qt.resolvedUrl('../../icons/question.png')
+        : Qt.resolvedUrl('../../icons/info.png')
 
     property bool yesno: false
     property alias text: message.text
+    property bool richText: false
 
     signal yesClicked
-    signal noClicked
 
     parent: Overlay.overlay
     modal: true
+    z: 1 // raise z so it also covers dialogs using overlay as parent
 
     anchors.centerIn: parent
 
@@ -30,7 +34,7 @@ ElDialog {
             Layout.preferredWidth: Overlay.overlay.width *2/3
             readOnly: true
             wrapMode: TextInput.WordWrap
-            //textFormat: TextEdit.RichText // existing translations not richtext yet
+            textFormat: richText ? TextEdit.RichText : TextEdit.PlainText
             background: Rectangle {
                 color: 'transparent'
             }
@@ -55,7 +59,7 @@ ElDialog {
                 text: qsTr('No')
                 visible: yesno
                 onClicked: {
-                    noClicked()
+                    reject()
                     dialog.close()
                 }
             }

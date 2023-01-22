@@ -6,6 +6,7 @@ from decimal import Decimal
 import math
 
 import attr
+import aiohttp
 
 from .crypto import sha256, hash_160
 from .ecc import ECPrivkey
@@ -21,6 +22,7 @@ from .lnutil import hex_to_bytes
 from .json_db import StoredObject
 from . import constants
 from .address_synchronizer import TX_HEIGHT_LOCAL
+from .i18n import _
 
 if TYPE_CHECKING:
     from .network import Network
@@ -77,6 +79,11 @@ WITNESS_TEMPLATE_REVERSE_SWAP = [
     opcodes.OP_ENDIF,
     opcodes.OP_CHECKSIG
 ]
+
+
+class SwapServerError(Exception):
+    def __str__(self):
+        return _("The swap server errored or is unreachable.")
 
 
 @attr.s
@@ -323,14 +330,16 @@ class SwapManager(Logger):
         if locktime - self.network.get_local_height() >= 144:
             raise Exception("fswap check failed: locktime too far in future")
         # create funding tx
+        # note: rbf must not decrease payment
+        # this is taken care of in wallet._is_rbf_allowed_to_touch_tx_output
         funding_output = PartialTxOutput.from_address_and_value(lockup_address, onchain_amount)
         if tx is None:
-            tx = self.wallet.create_transaction(outputs=[funding_output], rbf=False, password=password)
+            tx = self.wallet.create_transaction(outputs=[funding_output], rbf=True, password=password)
         else:
             dummy_output = PartialTxOutput.from_address_and_value(ln_dummy_address(), expected_onchain_amount_sat)
             tx.outputs().remove(dummy_output)
             tx.add_outputs([funding_output])
-            tx.set_rbf(True)  # note: rbf must not decrease payment
+            tx.set_rbf(True)
             self.wallet.sign_transaction(tx, password)
         # save swap data in wallet in case we need a refund
         receive_address = self.wallet.get_receiving_address()
@@ -470,11 +479,17 @@ class SwapManager(Logger):
         self._swaps_by_lockup_address[swap.lockup_address] = swap
 
     async def get_pairs(self) -> None:
+        """Might raise SwapServerError."""
         from .network import Network
-        response = await Network.async_send_http_on_proxy(
-            'get',
-            self.api_url + '/getpairs',
-            timeout=30)
+        try:
+            response = await Network.async_send_http_on_proxy(
+                'get',
+                self.api_url + '/getpairs',
+                timeout=30)
+        except aiohttp.ClientError as e:
+            self.logger.error(f"Swap server errored: {e!r}")
+            raise SwapServerError() from e
+        # we assume server response is well-formed; otherwise let an exception propagate to the crash reporter
         pairs = json.loads(response)
         fees = pairs['pairs']['BTC/BTC']['fees']
         self.percentage = fees['percentage']

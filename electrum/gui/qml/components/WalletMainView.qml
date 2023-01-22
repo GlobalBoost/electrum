@@ -1,6 +1,7 @@
 import QtQuick 2.6
 import QtQuick.Controls 2.3
 import QtQuick.Layouts 1.0
+import QtQuick.Controls.Material 2.0
 import QtQml 2.6
 
 import org.electrum 1.0
@@ -41,7 +42,8 @@ Item {
     property QtObject menu: Menu {
         parent: Overlay.overlay
         dim: true
-        Overlay.modeless: Rectangle {
+        modal: true
+        Overlay.modal: Rectangle {
             color: "#44000000"
         }
 
@@ -51,6 +53,7 @@ Item {
             action: Action {
                 text: qsTr('Invoices');
                 onTriggered: menu.openPage(Qt.resolvedUrl('Invoices.qml'))
+                enabled: Daemon.currentWallet
                 icon.source: '../../icons/tab_receive.png'
             }
         }
@@ -61,22 +64,6 @@ Item {
                 onTriggered: menu.openPage(Qt.resolvedUrl('Addresses.qml'));
                 enabled: Daemon.currentWallet
                 icon.source: '../../icons/tab_addresses.png'
-            }
-        }
-        MenuItem {
-            icon.color: 'transparent'
-            action: Action {
-                text: qsTr('Wallets');
-                onTriggered: menu.openPage(Qt.resolvedUrl('Wallets.qml'))
-                icon.source: '../../icons/wallet.png'
-            }
-        }
-        MenuItem {
-            icon.color: 'transparent'
-            action: Action {
-                text: qsTr('Network');
-                onTriggered: menu.openPage(Qt.resolvedUrl('NetworkOverview.qml'))
-                icon.source: '../../icons/network.png'
             }
         }
         MenuItem {
@@ -125,20 +112,27 @@ Item {
             Layout.alignment: Qt.AlignHCenter
         }
 
-        Button {
-            text: qsTr('Open/Create Wallet')
+        Pane {
             Layout.alignment: Qt.AlignHCenter
-            onClicked: {
-                if (Daemon.availableWallets.rowCount() > 0) {
-                    stack.push(Qt.resolvedUrl('Wallets.qml'))
-                } else {
-                    var newww = app.newWalletWizard.createObject(app)
-                    newww.walletCreated.connect(function() {
-                        Daemon.availableWallets.reload()
-                        // and load the new wallet
-                        Daemon.load_wallet(newww.path, newww.wizard_data['password'])
-                    })
-                    newww.open()
+            padding: 0
+            background: Rectangle {
+                color: Material.dialogColor
+            }
+            FlatButton {
+                text: qsTr('Open/Create Wallet')
+                icon.source: '../../icons/wallet.png'
+                onClicked: {
+                    if (Daemon.availableWallets.rowCount() > 0) {
+                        stack.push(Qt.resolvedUrl('Wallets.qml'))
+                    } else {
+                        var newww = app.newWalletWizard.createObject(app)
+                        newww.walletCreated.connect(function() {
+                            Daemon.availableWallets.reload()
+                            // and load the new wallet
+                            Daemon.load_wallet(newww.path, newww.wizard_data['password'])
+                        })
+                        newww.open()
+                    }
                 }
             }
         }
@@ -158,11 +152,13 @@ Item {
             spacing: 0
 
             FlatButton {
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                icon.source: '../../icons/tab_send.png'
-                text: qsTr('Send')
-                onClicked: openSendDialog()
+                Layout.fillWidth: false
+                Layout.preferredWidth: implicitHeight
+                text: qsTr('≡')
+                onClicked: {
+                    mainView.menu.open()
+                    mainView.menu.y = mainView.height - mainView.menu.height
+                }
             }
             Rectangle {
                 Layout.fillWidth: false
@@ -180,6 +176,20 @@ Item {
                     var dialog = receiveDialog.createObject(mainView)
                     dialog.open()
                 }
+            }
+            Rectangle {
+                Layout.fillWidth: false
+                Layout.preferredWidth: 2
+                Layout.preferredHeight: parent.height * 2/3
+                Layout.alignment: Qt.AlignVCenter
+                color: constants.darkerBackground
+            }
+            FlatButton {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                icon.source: '../../icons/tab_send.png'
+                text: qsTr('Send')
+                onClicked: openSendDialog()
             }
         }
     }
@@ -258,6 +268,7 @@ Item {
                 }
                 close()
             }
+
             onClosed: destroy()
         }
     }
@@ -305,12 +316,18 @@ Item {
     Component {
         id: confirmPaymentDialog
         ConfirmTxDialog {
+            id: _confirmPaymentDialog
             title: qsTr('Confirm Payment')
             finalizer: TxFinalizer {
                 wallet: Daemon.currentWallet
-                canRbf: Config.useRbf
+                canRbf: true
+                onFinishedSave: {
+                    // tx was (partially) signed and saved. Show QR for co-signers or online wallet
+                    var page = app.stack.push(Qt.resolvedUrl('TxDetails.qml'), { txid: txid })
+                    page.showExport()
+                    _confirmPaymentDialog.destroy()
+                }
             }
-            onClosed: destroy()
         }
     }
 

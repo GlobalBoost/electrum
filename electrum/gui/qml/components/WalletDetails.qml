@@ -63,25 +63,8 @@ Pane {
                 width: parent.width
                 spacing: constants.paddingLarge
 
-                RowLayout {
-                    Label {
-                        text: qsTr('Wallet:')
-                        font.pixelSize: constants.fontSizeLarge
-                        color: Material.accentColor
-                    }
-
-                    Label {
-                        text: Daemon.currentWallet.name;
-                        font.bold: true
-                        font.pixelSize: constants.fontSizeLarge
-                        Layout.fillWidth: true
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 1
-                    color: Material.accentColor
+                Heading {
+                    text: qsTr('Wallet details')
                 }
 
                 GridLayout {
@@ -154,7 +137,7 @@ Pane {
                     id: piechart
                     visible: Daemon.currentWallet.totalBalance.satsInt > 0
                     Layout.preferredWidth: parent.width
-                    implicitHeight: 200 // TODO: sane value dependent on screen
+                    implicitHeight: 220 // TODO: sane value dependent on screen
                     innerOffset: 6
                     function updateSlices() {
                         var totalB = Daemon.currentWallet.totalBalance.satsInt
@@ -162,10 +145,76 @@ Pane {
                         var frozenB = Daemon.currentWallet.frozenBalance.satsInt
                         var lnB = Daemon.currentWallet.lightningBalance.satsInt
                         piechart.slices = [
+                            { v: lnB/totalB, color: constants.colorPiechartLightning, text: 'Lightning' },
                             { v: (onchainB-frozenB)/totalB, color: constants.colorPiechartOnchain, text: 'On-chain' },
                             { v: frozenB/totalB, color: constants.colorPiechartFrozen, text: 'On-chain (frozen)' },
-                            { v: lnB/totalB, color: constants.colorPiechartLightning, text: 'Lightning' }
                         ]
+                    }
+                }
+
+                GridLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    visible: Daemon.currentWallet
+                    columns: 3
+
+                    Item {
+                        visible: !Daemon.currentWallet.totalBalance.isEmpty
+                        Layout.preferredWidth: 1; Layout.preferredHeight: 1
+                    }
+                    Label {
+                        visible: !Daemon.currentWallet.totalBalance.isEmpty
+                        text: qsTr('Total')
+                    }
+                    FormattedAmount {
+                        visible: !Daemon.currentWallet.totalBalance.isEmpty
+                        amount: Daemon.currentWallet.totalBalance
+                    }
+
+                    Rectangle {
+                        visible: !Daemon.currentWallet.lightningBalance.isEmpty
+                        Layout.preferredWidth: constants.iconSizeXSmall
+                        Layout.preferredHeight: constants.iconSizeXSmall
+                        color: constants.colorPiechartLightning
+                    }
+                    Label {
+                        visible: !Daemon.currentWallet.lightningBalance.isEmpty
+                        text: qsTr('Lightning')
+
+                    }
+                    FormattedAmount {
+                        amount: Daemon.currentWallet.lightningBalance
+                        visible: !Daemon.currentWallet.lightningBalance.isEmpty
+                    }
+
+                    Rectangle {
+                        visible: !Daemon.currentWallet.lightningBalance.isEmpty || !Daemon.currentWallet.frozenBalance.isEmpty
+                        Layout.preferredWidth: constants.iconSizeXSmall
+                        Layout.preferredHeight: constants.iconSizeXSmall
+                        color: constants.colorPiechartOnchain
+                    }
+                    Label {
+                        visible: !Daemon.currentWallet.lightningBalance.isEmpty || !Daemon.currentWallet.frozenBalance.isEmpty
+                        text: qsTr('On-chain')
+
+                    }
+                    FormattedAmount {
+                        amount: Daemon.currentWallet.confirmedBalance
+                        visible: !Daemon.currentWallet.lightningBalance.isEmpty || !Daemon.currentWallet.frozenBalance.isEmpty
+                    }
+
+                    Rectangle {
+                        visible: !Daemon.currentWallet.frozenBalance.isEmpty
+                        Layout.preferredWidth: constants.iconSizeXSmall
+                        Layout.preferredHeight: constants.iconSizeXSmall
+                        color: constants.colorPiechartFrozen
+                    }
+                    Label {
+                        visible: !Daemon.currentWallet.frozenBalance.isEmpty
+                        text: qsTr('Frozen')
+                    }
+                    FormattedAmount {
+                        amount: Daemon.currentWallet.frozenBalance
+                        visible: !Daemon.currentWallet.frozenBalance.isEmpty
                     }
                 }
 
@@ -173,6 +222,46 @@ Pane {
                     Layout.preferredWidth: parent.width
                     visible: Daemon.currentWallet
                     columns: 2
+
+                    Label {
+                        Layout.columnSpan: 2
+                        visible: Daemon.currentWallet.hasSeed
+                        text: qsTr('Seed')
+                        color: Material.accentColor
+                    }
+
+                    TextHighlightPane {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        visible: Daemon.currentWallet.hasSeed
+                        RowLayout {
+                            width: parent.width
+                            Label {
+                                id: seedText
+                                visible: false
+                                Layout.fillWidth: true
+                                text: Daemon.currentWallet.seed
+                                wrapMode: Text.Wrap
+                                font.family: FixedFont
+                                font.pixelSize: constants.fontSizeMedium
+                            }
+                            Label {
+                                id: showSeedText
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignHCenter
+                                text: qsTr('Tap to show seed')
+                                wrapMode: Text.Wrap
+                                font.pixelSize: constants.fontSizeLarge
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    seedText.visible = true
+                                    showSeedText.visible = false
+                                }
+                            }
+                        }
+                    }
 
                     Label {
                         Layout.columnSpan: 2

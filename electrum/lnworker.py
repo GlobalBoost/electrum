@@ -184,9 +184,10 @@ LNWALLET_FEATURES = BASE_FEATURES\
     | LnFeatures.OPTION_STATIC_REMOTEKEY_REQ\
     | LnFeatures.GOSSIP_QUERIES_REQ\
     | LnFeatures.BASIC_MPP_OPT\
-    | LnFeatures.OPTION_TRAMPOLINE_ROUTING_OPT\
+    | LnFeatures.OPTION_TRAMPOLINE_ROUTING_OPT_ELECTRUM\
     | LnFeatures.OPTION_SHUTDOWN_ANYSEGWIT_OPT\
     | LnFeatures.OPTION_CHANNEL_TYPE_OPT\
+    | LnFeatures.OPTION_SCID_ALIAS_OPT\
 
 LNGOSSIP_FEATURES = BASE_FEATURES\
     | LnFeatures.GOSSIP_QUERIES_OPT\
@@ -935,11 +936,12 @@ class LNWallet(LNWorker):
                 amount_msat = 0
             label = 'Reverse swap' if swap.is_reverse else 'Forward swap'
             delta = current_height - swap.locktime
-            tx_height = self.wallet.adb.get_tx_height(swap.funding_txid)
-            if swap.is_reverse and tx_height.height <= 0:
-                label += ' (%s)' % _('waiting for funding tx confirmation')
-            if not swap.is_reverse and not swap.is_redeemed and swap.spending_txid is None and delta < 0:
-                label += f' (refundable in {-delta} blocks)' # fixme: only if unspent
+            if self.wallet.adb.is_mine(swap.funding_txid):
+                tx_height = self.wallet.adb.get_tx_height(swap.funding_txid)
+                if swap.is_reverse and tx_height.height <= 0:
+                    label += ' (%s)' % _('waiting for funding tx confirmation')
+                if not swap.is_reverse and not swap.is_redeemed and swap.spending_txid is None and delta < 0:
+                    label += f' (refundable in {-delta} blocks)' # fixme: only if unspent
             out[txid] = {
                 'txid': txid,
                 'group_id': txid,
@@ -1002,7 +1004,7 @@ class LNWallet(LNWorker):
         elif chan.get_state() == ChannelState.FUNDED:
             peer = self._peers.get(chan.node_id)
             if peer and peer.is_initialized():
-                peer.send_funding_locked(chan)
+                peer.send_channel_ready(chan)
 
         elif chan.get_state() == ChannelState.OPEN:
             peer = self._peers.get(chan.node_id)
@@ -1317,9 +1319,12 @@ class LNWallet(LNWorker):
                 #       Some of the errors might depend on how we have chosen them.
                 #       Having more attempts is currently useful in part because of the randomness,
                 #       instead we should give feedback to create_routes_for_payment.
+                # Sometimes the trampoline node fails to send a payment and returns
+                # TEMPORARY_CHANNEL_FAILURE, while it succeeds with a higher trampoline fee.
                 if code in (
                         OnionFailureCode.TRAMPOLINE_FEE_INSUFFICIENT,
-                        OnionFailureCode.TRAMPOLINE_EXPIRY_TOO_SOON):
+                        OnionFailureCode.TRAMPOLINE_EXPIRY_TOO_SOON,
+                        OnionFailureCode.TEMPORARY_CHANNEL_FAILURE):
                     # TODO: parse the node policy here (not returned by eclair yet)
                     # TODO: erring node is always the first trampoline even if second
                     #  trampoline demands more fees, we can't influence this
@@ -1329,8 +1334,7 @@ class LNWallet(LNWorker):
                     use_two_trampolines = False
                 elif code in (
                         OnionFailureCode.UNKNOWN_NEXT_PEER,
-                        OnionFailureCode.TEMPORARY_NODE_FAILURE,
-                        OnionFailureCode.TEMPORARY_CHANNEL_FAILURE):
+                        OnionFailureCode.TEMPORARY_NODE_FAILURE):
                     trampoline_route = htlc_log.route
                     r = [hop.end_node.hex() for hop in trampoline_route]
                     self.logger.info(f'failed trampoline route: {r}')
@@ -1359,6 +1363,7 @@ class LNWallet(LNWorker):
         # send a single htlc
         short_channel_id = route[0].short_channel_id
         chan = self.get_channel_by_short_id(short_channel_id)
+        assert chan, ShortChannelID(short_channel_id)
         peer = self._peers.get(route[0].node_id)
         if not peer:
             raise PaymentFailure('Dropped peer')
@@ -1529,9 +1534,10 @@ class LNWallet(LNWorker):
         if is_hardcoded_trampoline(node_id):
             return True
         peer = self._peers.get(node_id)
-        if peer and peer.their_features.supports(LnFeatures.OPTION_TRAMPOLINE_ROUTING_OPT):
-            return True
-        return False
+        if not peer:
+            return False
+        return (peer.their_features.supports(LnFeatures.OPTION_TRAMPOLINE_ROUTING_OPT_ECLAIR)\
+                or peer.their_features.supports(LnFeatures.OPTION_TRAMPOLINE_ROUTING_OPT_ELECTRUM))
 
     def suggest_peer(self) -> Optional[bytes]:
         if not self.uses_trampoline():
@@ -1705,6 +1711,7 @@ class LNWallet(LNWorker):
             my_sending_channels: List[Channel],
             full_path: Optional[LNPaymentPath]) -> LNPaymentRoute:
 
+        my_sending_aliases = set(chan.get_local_alias() for chan in my_sending_channels)
         my_sending_channels = {chan.short_channel_id: chan for chan in my_sending_channels
             if chan.short_channel_id is not None}
         # Collect all private edges from route hints.
@@ -1716,6 +1723,10 @@ class LNWallet(LNWorker):
             private_path_nodes = [edge[0] for edge in private_path][1:] + [invoice_pubkey]
             private_path_rest = [edge[1:] for edge in private_path]
             start_node = private_path[0][0]
+            # remove aliases from direct routes
+            if len(private_path) == 1 and private_path[0][1] in my_sending_aliases:
+                self.logger.info(f'create_route: skipping alias {ShortChannelID(private_path[0][1])}')
+                continue
             for end_node, edge_rest in zip(private_path_nodes, private_path_rest):
                 short_channel_id, fee_base_msat, fee_proportional_millionths, cltv_expiry_delta = edge_rest
                 short_channel_id = ShortChannelID(short_channel_id)
@@ -2021,9 +2032,9 @@ class LNWallet(LNWorker):
         scid_to_my_channels = {chan.short_channel_id: chan for chan in channels
                                if chan.short_channel_id is not None}
         for chan in channels:
-            chan_id = chan.short_channel_id
-            assert isinstance(chan_id, bytes), chan_id
-            channel_info = get_mychannel_info(chan_id, scid_to_my_channels)
+            alias_or_scid = chan.get_remote_alias() or chan.short_channel_id
+            assert isinstance(alias_or_scid, bytes), alias_or_scid
+            channel_info = get_mychannel_info(chan.short_channel_id, scid_to_my_channels)
             # note: as a fallback, if we don't have a channel update for the
             # incoming direction of our private channel, we fill the invoice with garbage.
             # the sender should still be able to pay us, but will incur an extra round trip
@@ -2041,11 +2052,11 @@ class LNWallet(LNWorker):
                     missing_info = False
             if missing_info:
                 self.logger.info(
-                    f"Warning. Missing channel update for our channel {chan_id}; "
+                    f"Warning. Missing channel update for our channel {chan.short_channel_id}; "
                     f"filling invoice with incorrect data.")
             routing_hints.append(('r', [(
                 chan.node_id,
-                chan_id,
+                alias_or_scid,
                 fee_base_msat,
                 fee_proportional_millionths,
                 cltv_expiry_delta)]))

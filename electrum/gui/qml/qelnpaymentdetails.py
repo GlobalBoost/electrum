@@ -7,16 +7,18 @@ from .qetypes import QEAmount
 from .qewallet import QEWallet
 
 class QELnPaymentDetails(QObject):
+    _logger = get_logger(__name__)
+
+    detailsChanged = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
-    _logger = get_logger(__name__)
-
-    _wallet = None
-    _key = None
-    _date = None
-
-    detailsChanged = pyqtSignal()
+        self._wallet = None
+        self._key = None
+        self._date = None
+        self._fee = QEAmount()
+        self._amount = QEAmount()
 
     walletChanged = pyqtSignal()
     @pyqtProperty(QEWallet, notify=walletChanged)
@@ -91,8 +93,8 @@ class QELnPaymentDetails(QObject):
         tx = self._wallet.wallet.lnworker.get_lightning_history()[bfh(self._key)]
         self._logger.debug(str(tx))
 
-        self._fee = QEAmount() if not tx['fee_msat'] else QEAmount(amount_msat=tx['fee_msat'])
-        self._amount = QEAmount(amount_msat=tx['amount_msat'])
+        self._fee.msatsInt = 0 if not tx['fee_msat'] else int(tx['fee_msat'])
+        self._amount.msatsInt = int(tx['amount_msat'])
         self._label = tx['label']
         self._date = format_time(tx['timestamp'])
         self._status = 'settled' # TODO: other states? get_lightning_history is deciding the filter for us :(

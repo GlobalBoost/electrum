@@ -10,11 +10,11 @@ from .qetypes import QEAmount
 from .auth import AuthMixin, auth_protect
 
 class QEConfig(AuthMixin, QObject):
+    _logger = get_logger(__name__)
+
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.config = config
-
-    _logger = get_logger(__name__)
 
     autoConnectChanged = pyqtSignal()
     @pyqtProperty(bool, notify=autoConnectChanged)
@@ -145,16 +145,6 @@ class QEConfig(AuthMixin, QObject):
     def enableDebugLogs(self, enable):
         self.config.set_key('gui_enable_debug_logs', enable)
         self.enableDebugLogsChanged.emit()
-
-    useRbfChanged = pyqtSignal()
-    @pyqtProperty(bool, notify=useRbfChanged)
-    def useRbf(self):
-        return self.config.get('use_rbf', True)
-
-    @useRbf.setter
-    def useRbf(self, useRbf):
-        self.config.set_key('use_rbf', useRbf)
-        self.useRbfChanged.emit()
 
     useRecoverableChannelsChanged = pyqtSignal()
     @pyqtProperty(bool, notify=useRecoverableChannelsChanged)

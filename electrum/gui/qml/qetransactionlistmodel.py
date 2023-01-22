@@ -10,18 +10,6 @@ from .qetypes import QEAmount
 from .util import QtEventListener, qt_event_listener
 
 class QETransactionListModel(QAbstractListModel, QtEventListener):
-    def __init__(self, wallet, parent=None, *, onchain_domain=None, include_lightning=True):
-        super().__init__(parent)
-        self.wallet = wallet
-        self.onchain_domain = onchain_domain
-        self.include_lightning = include_lightning
-
-        self.register_callbacks()
-        self.destroyed.connect(lambda: self.on_destroy())
-        self.requestRefresh.connect(lambda: self.init_model())
-
-        self.init_model()
-
     _logger = get_logger(__name__)
 
     # define listmodel rolemap
@@ -34,6 +22,18 @@ class QETransactionListModel(QAbstractListModel, QtEventListener):
 
     requestRefresh = pyqtSignal()
 
+    def __init__(self, wallet, parent=None, *, onchain_domain=None, include_lightning=True):
+        super().__init__(parent)
+        self.wallet = wallet
+        self.onchain_domain = onchain_domain
+        self.include_lightning = include_lightning
+
+        self.register_callbacks()
+        self.destroyed.connect(lambda: self.on_destroy())
+        self.requestRefresh.connect(lambda: self.init_model())
+
+        self.init_model()
+
     def on_destroy(self):
         self.unregister_callbacks()
 
@@ -44,6 +44,12 @@ class QETransactionListModel(QAbstractListModel, QtEventListener):
             self.on_tx_verified(txid, info)
 
     def rowCount(self, index):
+        return len(self.tx_history)
+
+    # also expose rowCount as a property
+    countChanged = pyqtSignal()
+    @pyqtProperty(int, notify=countChanged)
+    def count(self):
         return len(self.tx_history)
 
     def roleNames(self):
@@ -146,6 +152,8 @@ class QETransactionListModel(QAbstractListModel, QtEventListener):
         self.tx_history = txs
         self.tx_history.reverse()
         self.endInsertRows()
+
+        self.countChanged.emit()
 
     def on_tx_verified(self, txid, info):
         i = 0

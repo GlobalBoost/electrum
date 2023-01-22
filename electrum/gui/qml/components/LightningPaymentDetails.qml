@@ -12,10 +12,7 @@ Pane {
     width: parent.width
     height: parent.height
 
-    // property string title: qsTr("Lightning payment details")
-
     property string key
-
     property alias label: lnpaymentdetails.label
 
     signal detailsChanged
@@ -31,18 +28,9 @@ Pane {
             width: parent.width
             columns: 2
 
-            Label {
+            Heading {
                 Layout.columnSpan: 2
                 text: qsTr('Lightning payment details')
-                font.pixelSize: constants.fontSizeLarge
-                color: Material.accentColor
-            }
-
-            Rectangle {
-                Layout.columnSpan: 2
-                Layout.fillWidth: true
-                height: 1
-                color: Material.accentColor
             }
 
             Label {
@@ -70,14 +58,8 @@ Pane {
                 color: Material.accentColor
             }
 
-            RowLayout {
-                Label {
-                    text: Config.formatMilliSats(lnpaymentdetails.amount)
-                }
-                Label {
-                    text: Config.baseUnit
-                    color: Material.accentColor
-                }
+            FormattedAmount {
+                amount: lnpaymentdetails.amount
             }
 
             Label {

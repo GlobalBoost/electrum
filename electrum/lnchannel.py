@@ -198,6 +198,9 @@ class AbstractChannel(Logger, ABC):
     def short_id_for_GUI(self) -> str:
         return format_short_channel_id(self.short_channel_id)
 
+    def diagnostic_name(self):
+        return self.get_id_for_log()
+
     def set_state(self, state: ChannelState, *, force: bool = False) -> None:
         """Set on-chain state.
         `force` can be set while debugging from the console to allow illegal transitions.
@@ -440,7 +443,6 @@ class ChannelBackup(AbstractChannel):
 
     def __init__(self, cb: ChannelBackupStorage, *, lnworker=None):
         self.name = None
-        Logger.__init__(self)
         self.cb = cb
         self.is_imported = isinstance(self.cb, ImportedChannelBackupStorage)
         self._sweep_info = {}
@@ -451,6 +453,7 @@ class ChannelBackup(AbstractChannel):
         self.funding_outpoint = cb.funding_outpoint()
         self.lnworker = lnworker
         self.short_channel_id = None
+        Logger.__init__(self)
         self.config = {}
         if self.is_imported:
             self.init_config(cb)
@@ -611,6 +614,18 @@ class Channel(AbstractChannel):
         self.should_request_force_close = False
         self.unconfirmed_closing_txid = None # not a state, only for GUI
 
+    def get_local_alias(self) -> bytes:
+        # deterministic, same secrecy level as wallet master pubkey
+        wallet_fingerprint = bytes(self.lnworker.wallet.get_fingerprint(), "utf8")
+        return sha256(wallet_fingerprint + self.channel_id)[0:8]
+
+    def save_remote_alias(self, alias: bytes):
+        self.storage['alias'] = alias.hex()
+
+    def get_remote_alias(self) -> Optional[bytes]:
+        alias = self.storage.get('alias')
+        return bytes.fromhex(alias) if alias else None
+
     def has_onchain_backup(self):
         return self.storage.get('has_onchain_backup', False)
 
@@ -632,7 +647,7 @@ class Channel(AbstractChannel):
     def diagnostic_name(self):
         if self.name:
             return str(self.name)
-        return self.get_id_for_log()
+        return super().diagnostic_name()
 
     def set_onion_key(self, key: int, value: bytes):
         self.onion_keys[key] = value

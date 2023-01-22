@@ -89,14 +89,16 @@ class AbstractWizard:
         self._current = new_view
 
         self._logger.debug(f'resolve_next view is {self._current.view}')
-        self._logger.debug('stack:' + repr(self._stack))
+        self.log_stack(self._stack)
 
         return new_view
 
     def resolve_prev(self):
         prev_view = self._stack.pop()
+
         self._logger.debug(f'resolve_prev view is {prev_view}')
-        self._logger.debug('stack:' + repr(self._stack))
+        self.log_stack(self._stack)
+
         self._current = prev_view
         return prev_view
 
@@ -129,6 +131,33 @@ class AbstractWizard:
         self.stack = []
         self._current = WizardViewState(None, {}, {})
 
+    def log_stack(self, _stack):
+        logstr = 'wizard stack:'
+        stack = copy.deepcopy(_stack)
+        i = 0
+        for item in stack:
+            self.sanitize_stack_item(item.wizard_data)
+            logstr += f'\n{i}: {repr(item.wizard_data)}'
+            i += 1
+        self._logger.debug(logstr)
+
+    def log_state(self, _current):
+        current = copy.deepcopy(_current)
+        self.sanitize_stack_item(current)
+        self._logger.debug(f'wizard current: {repr(current)}')
+
+    def sanitize_stack_item(self, _stack_item):
+        sensitive_keys = ['seed', 'seed_extra_words', 'master_key', 'private_key_list', 'password']
+        def sanitize(_dict):
+            for item in _dict:
+                if isinstance(_dict[item], dict):
+                    sanitize(_dict[item])
+                else:
+                    if item in sensitive_keys:
+                        _dict[item] = '<sensitive value removed>'
+        sanitize(_stack_item)
+
+
 class NewWalletWizard(AbstractWizard):
 
     _logger = get_logger(__name__)
@@ -148,31 +177,28 @@ class NewWalletWizard(AbstractWizard):
                 'next': 'confirm_seed'
             },
             'confirm_seed': {
-                'next': lambda d: 'wallet_password' if not self.is_multisig(d) else 'multisig_show_masterpubkey',
+                'next': self.on_have_or_confirm_seed,
                 'accept': self.maybe_master_pubkey,
                 'last': lambda v,d: self.is_single_password() and not self.is_multisig(d)
             },
             'have_seed': {
-                'next': self.on_have_seed,
+                'next': self.on_have_or_confirm_seed,
                 'accept': self.maybe_master_pubkey,
                 'last': lambda v,d: self.is_single_password() and not self.is_bip39_seed(d) and not self.is_multisig(d)
             },
             'bip39_refine': {
-                'next': lambda d: 'wallet_password' if not self.is_multisig(d) else 'multisig_show_masterpubkey',
+                'next': lambda d: 'wallet_password' if not self.is_multisig(d) else 'multisig_cosigner_keystore',
                 'accept': self.maybe_master_pubkey,
                 'last': lambda v,d: self.is_single_password() and not self.is_multisig(d)
             },
             'have_master_key': {
-                'next': lambda d: 'wallet_password' if not self.is_multisig(d) else 'multisig_show_masterpubkey',
+                'next': lambda d: 'wallet_password' if not self.is_multisig(d) else 'multisig_cosigner_keystore',
                 'accept': self.maybe_master_pubkey,
                 'last': lambda v,d: self.is_single_password() and not self.is_multisig(d)
             },
             'multisig': {
                 'next': 'keystore_type'
             },
-            # 'multisig_show_masterpubkey': {
-            #     'next': 'multisig_cosigner_keystore'
-            # },
             'multisig_cosigner_keystore': { # this view should set 'multisig_current_cosigner'
                 'next': self.on_cosigner_keystore_type
             },
@@ -229,7 +255,7 @@ class NewWalletWizard(AbstractWizard):
             'masterkey': 'have_master_key'
         }.get(t)
 
-    def on_have_seed(self, wizard_data):
+    def on_have_or_confirm_seed(self, wizard_data):
         if self.is_bip39_seed(wizard_data):
             return 'bip39_refine'
         elif self.is_multisig(wizard_data):

@@ -23,7 +23,7 @@ ElDialog {
 
     parent: Overlay.overlay
     modal: true
-    standardButtons: Dialog.Close
+    iconSource: Qt.resolvedUrl('../../icons/tab_receive.png')
 
     Overlay.modal: Rectangle {
         color: "#aa000000"
@@ -56,29 +56,29 @@ ElDialog {
                     State {
                         name: 'bolt11'
                         PropertyChanges { target: qrloader; sourceComponent: qri_bolt11 }
-                        PropertyChanges { target: bolt11label; font.bold: true; color: Material.accentColor }
+                        PropertyChanges { target: bolt11label; color: Material.accentColor; font.underline: true }
                     },
                     State {
                         name: 'bip21uri'
                         PropertyChanges { target: qrloader; sourceComponent: qri_bip21uri }
-                        PropertyChanges { target: bip21label; font.bold: true; color: Material.accentColor }
+                        PropertyChanges { target: bip21label; color: Material.accentColor; font.underline: true }
                     },
                     State {
                         name: 'address'
                         PropertyChanges { target: qrloader; sourceComponent: qri_address }
-                        PropertyChanges { target: addresslabel; font.bold: true; color: Material.accentColor }
+                        PropertyChanges { target: addresslabel; color: Material.accentColor; font.underline: true }
                     }
                 ]
 
-                Item {
+                Rectangle {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.topMargin: constants.paddingSmall
                     Layout.bottomMargin: constants.paddingSmall
 
-                    // Layout.preferredWidth: qrloader.width
-                    // Layout.preferredHeight: qrloader.height
                     Layout.preferredWidth: dialog.width * 7/8
                     Layout.preferredHeight: dialog.width * 7/8
+
+                    color: 'white'
 
                     Loader {
                         id: qrloader
@@ -179,14 +179,14 @@ ElDialog {
                 Rectangle {
                     height: 1
                     Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: qrloader.width
+                    Layout.preferredWidth: buttons.width
                     color: Material.accentColor
                 }
 
                 GridLayout {
                     columns: 2
                     visible: request.message || !request.amount.isEmpty
-                    Layout.maximumWidth: qrloader.width
+                    Layout.maximumWidth: buttons.width
                     Layout.alignment: Qt.AlignHCenter
 
                     Label {
@@ -205,24 +205,9 @@ ElDialog {
                         text: qsTr('Amount')
                         color: Material.accentColor
                     }
-                    RowLayout {
+                    FormattedAmount {
                         visible: !request.amount.isEmpty
-                        Label {
-                            text: Config.formatSats(request.amount)
-                            font.family: FixedFont
-                            font.pixelSize: constants.fontSizeMedium
-                            font.bold: true
-                        }
-                        Label {
-                            text: Config.baseUnit
-                            color: Material.accentColor
-                            font.pixelSize: constants.fontSizeMedium
-                        }
-                        Label {
-                            visible: Daemon.fx.enabled
-                            text: '(' + Daemon.fx.fiatValue(request.amount, false) + ' ' + Daemon.fx.fiatCurrency + ')'
-                            font.pixelSize: constants.fontSizeMedium
-                        }
+                        amount: request.amount
                     }
                 }
 
@@ -230,11 +215,12 @@ ElDialog {
                     visible: request.message || !request.amount.isEmpty
                     height: 1
                     Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: qrloader.width
+                    Layout.preferredWidth: buttons.width
                     color: Material.accentColor
                 }
 
                 RowLayout {
+                    id: buttons
                     Layout.alignment: Qt.AlignHCenter
                     FlatButton {
                         icon.source: '../../icons/copy_bw.png'

@@ -24,6 +24,11 @@ Pane {
         app.stack.pop()
     }
 
+    function showExport() {
+        var dialog = exportTxDialog.createObject(root, { txdetails: txdetails })
+        dialog.open()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -44,18 +49,9 @@ Pane {
                 width: parent.width
                 columns: 2
 
-                Label {
+                Heading {
                     Layout.columnSpan: 2
                     text: qsTr('Transaction Details')
-                    font.pixelSize: constants.fontSizeLarge
-                    color: Material.accentColor
-                }
-
-                Rectangle {
-                    Layout.columnSpan: 2
-                    Layout.fillWidth: true
-                    height: 1
-                    color: Material.accentColor
                 }
 
                 RowLayout {
@@ -74,7 +70,6 @@ Pane {
                 }
 
                 Label {
-                    Layout.fillWidth: true
                     visible: !txdetails.isUnrelated && txdetails.lnAmount.satsInt == 0
                     text: txdetails.amount.satsInt > 0
                             ? qsTr('Amount received')
@@ -92,32 +87,10 @@ Pane {
                     wrapMode: Text.Wrap
                 }
 
-                RowLayout {
+                FormattedAmount {
                     visible: !txdetails.isUnrelated
                     Layout.fillWidth: true
-                    Label {
-                        visible: txdetails.lnAmount.satsInt == 0
-                        text: Config.formatSats(txdetails.amount)
-                        font.family: FixedFont
-                    }
-                    Label {
-                        visible: txdetails.lnAmount.satsInt != 0
-                        text: Config.formatSats(txdetails.lnAmount)
-                        font.family: FixedFont
-                    }
-                    Label {
-                        text: Config.baseUnit
-                        color: Material.accentColor
-                    }
-                }
-
-                Item {
-                    visible: !txdetails.isUnrelated && Daemon.fx.enabled; Layout.preferredWidth: 1; Layout.preferredHeight: 1
-                }
-
-                Label {
-                    visible: !txdetails.isUnrelated && Daemon.fx.enabled && txdetails.lnAmount.satsInt == 0
-                    text: Daemon.fx.fiatValue(txdetails.amount, false) + ' ' + Daemon.fx.fiatCurrency
+                    amount: txdetails.lnAmount.isEmpty ? txdetails.amount : txdetails.lnAmount
                 }
 
                 Label {
@@ -127,25 +100,22 @@ Pane {
 
 
                 Label {
-                    Layout.fillWidth: true
-                    visible: txdetails.fee.satsInt != 0
+                    visible: !txdetails.fee.isEmpty
                     text: qsTr('Transaction fee')
                     color: Material.accentColor
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    visible: txdetails.fee.satsInt != 0
-                    Label {
-                        text: Config.formatSats(txdetails.fee)
-                        font.family: FixedFont
-                    }
-                    Label {
+                    visible: !txdetails.fee.isEmpty
+                    FormattedAmount {
                         Layout.fillWidth: true
-                        text: Config.baseUnit
-                        color: Material.accentColor
+                        amount: txdetails.fee
+                        singleLine: !(txdetails.canBump || txdetails.canCpfp)
                     }
                     FlatButton {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: implicitWidth
                         icon.source: '../../icons/warning.png'
                         icon.color: 'transparent'
                         text: qsTr('Bump fee')
@@ -162,6 +132,7 @@ Pane {
                 }
 
                 Label {
+                    Layout.fillWidth: true
                     text: qsTr('Status')
                     color: Material.accentColor
                 }
