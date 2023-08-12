@@ -24,61 +24,106 @@
 # SOFTWARE.
 import os
 import ast
+import datetime
 import json
 import copy
 import threading
 from collections import defaultdict
 from typing import Dict, Optional, List, Tuple, Set, Iterable, NamedTuple, Sequence, TYPE_CHECKING, Union
 import binascii
+import time
+
+import attr
 
 from . import util, bitcoin
 from .util import profiler, WalletFileException, multisig_type, TxMinedInfo, bfh
-from .invoices import Invoice
+from .invoices import Invoice, Request
 from .keystore import bip44_derivation
 from .transaction import Transaction, TxOutpoint, tx_from_any, PartialTransaction, PartialTxOutput
 from .logging import Logger
-from .lnutil import LOCAL, REMOTE, FeeUpdate, UpdateAddHtlc, LocalConfig, RemoteConfig, ChannelType
-from .lnutil import ImportedChannelBackupStorage, OnchainChannelBackupStorage
-from .lnutil import ChannelConstraints, Outpoint, ShachainElement
-from .json_db import StoredDict, JsonDB, locked, modifier
-from .plugin import run_hook, plugin_loaders
-from .submarine_swaps import SwapData
 
-if TYPE_CHECKING:
-    from .storage import WalletStorage
+from .lnutil import LOCAL, REMOTE, HTLCOwner, ChannelType
+from . import json_db
+from .json_db import StoredDict, JsonDB, locked, modifier, StoredObject, stored_in, stored_as
+from .plugin import run_hook, plugin_loaders
+from .version import ELECTRUM_VERSION
+
 
 
 # seed_version is now used for the version of the wallet file
 
 OLD_SEED_VERSION = 4        # electrum versions < 2.0
 NEW_SEED_VERSION = 11       # electrum versions >= 2.0
-FINAL_SEED_VERSION = 50     # electrum >= 2.7 will set this to prevent
+FINAL_SEED_VERSION = 52     # electrum >= 2.7 will set this to prevent
                             # old versions from overwriting new format
 
 
+@stored_in('tx_fees', tuple)
 class TxFeesValue(NamedTuple):
     fee: Optional[int] = None
     is_calculated_by_us: bool = False
     num_inputs: Optional[int] = None
 
 
+@stored_as('db_metadata')
+@attr.s
+class DBMetadata(StoredObject):
+    creation_timestamp = attr.ib(default=None, type=int)
+    first_electrum_version_used = attr.ib(default=None, type=str)
+
+    def to_str(self) -> str:
+        ts = self.creation_timestamp
+        ver = self.first_electrum_version_used
+        if ts is None or ver is None:
+            return "unknown"
+        date_str = datetime.date.fromtimestamp(ts).isoformat()
+        return f"using {ver}, on {date_str}"
+
+
+# note: subclassing WalletFileException for some specific cases
+#       allows the crash reporter to distinguish them and open
+#       separate tracking issues
+class WalletFileExceptionVersion51(WalletFileException): pass
+
+# register dicts that require value conversions not handled by constructor
+json_db.register_dict('transactions', lambda x: tx_from_any(x, deserialize=False), None)
+json_db.register_dict('prevouts_by_scripthash', lambda x: set(tuple(k) for k in x), None)
+json_db.register_dict('data_loss_protect_remote_pcp', lambda x: bytes.fromhex(x), None)
+# register dicts that require key conversion
+for key in [
+        'adds', 'locked_in', 'settles', 'fails', 'fee_updates', 'buckets',
+        'unacked_updates', 'unfulfilled_htlcs', 'fail_htlc_reasons', 'onion_keys']:
+    json_db.register_dict_key(key, int)
+for key in ['log']:
+    json_db.register_dict_key(key, lambda x: HTLCOwner(int(x)))
+for key in ['locked_in', 'fails', 'settles']:
+    json_db.register_parent_key(key, lambda x: HTLCOwner(int(x)))
+
+
 class WalletDB(JsonDB):
 
-    def __init__(self, raw, *, manual_upgrades: bool):
-        JsonDB.__init__(self, {})
+    def __init__(self, data, *, manual_upgrades: bool):
+        JsonDB.__init__(self, data)
+        if not data:
+            # create new DB
+            self.put('seed_version', FINAL_SEED_VERSION)
+            self._add_db_creation_metadata()
+            self._after_upgrade_tasks()
         self._manual_upgrades = manual_upgrades
         self._called_after_upgrade_tasks = False
-        if raw:  # loading existing db
-            self.load_data(raw)
-            self.load_plugins()
-        else:  # creating new db
-            self.put('seed_version', FINAL_SEED_VERSION)
+        if not self._manual_upgrades and self.requires_split():
+            raise WalletFileException("This wallet has multiple accounts and must be split")
+        if not self.requires_upgrade():
             self._after_upgrade_tasks()
+        elif not self._manual_upgrades:
+            self.upgrade()
+        # load plugins that are conditional on wallet type
+        self.load_plugins()
 
     def load_data(self, s):
         try:
-            self.data = json.loads(s)
-        except:
+            JsonDB.load_data(self, s)
+        except Exception:
             try:
                 d = ast.literal_eval(s)
                 labels = d.get('labels', {})
@@ -89,20 +134,12 @@ class WalletDB(JsonDB):
                 try:
                     json.dumps(key)
                     json.dumps(value)
-                except:
+                except Exception:
                     self.logger.info(f'Failed to convert label to json format: {key}')
                     continue
                 self.data[key] = value
         if not isinstance(self.data, dict):
             raise WalletFileException("Malformed wallet file (not dict)")
-
-        if not self._manual_upgrades and self.requires_split():
-            raise WalletFileException("This wallet has multiple accounts and must be split")
-
-        if not self.requires_upgrade():
-            self._after_upgrade_tasks()
-        elif not self._manual_upgrades:
-            self.upgrade()
 
     def requires_split(self):
         d = self.get('accounts', {})
@@ -199,6 +236,8 @@ class WalletDB(JsonDB):
         self._convert_version_48()
         self._convert_version_49()
         self._convert_version_50()
+        self._convert_version_51()
+        self._convert_version_52()
         self.put('seed_version', FINAL_SEED_VERSION)  # just to be sure
 
         self._after_upgrade_tasks()
@@ -980,6 +1019,53 @@ class WalletDB(JsonDB):
         self._convert_invoices_keys(requests)
         self.data['seed_version'] = 50
 
+    def _convert_version_51(self):
+        from .lnaddr import lndecode
+        if not self._is_upgrade_method_needed(50, 50):
+            return
+        requests = self.data.get('payment_requests', {})
+        for key, item in list(requests.items()):
+            lightning_invoice = item.pop('lightning_invoice')
+            if lightning_invoice is None:
+                payment_hash = None
+            else:
+                lnaddr = lndecode(lightning_invoice)
+                payment_hash = lnaddr.paymenthash.hex()
+            item['payment_hash'] = payment_hash
+        self.data['seed_version'] = 51
+
+    def _detect_insane_version_51(self) -> int:
+        """Returns 0 if file okay,
+        error code 1: multisig wallet has old_mpk
+        error code 2: multisig wallet has mixed Ypub/Zpub
+        """
+        assert self.get('seed_version') == 51
+        xpub_type = None
+        for ks_name in ['x{}/'.format(i) for i in range(1, 16)]:  # having any such field <=> multisig wallet
+            ks = self.data.get(ks_name, None)
+            if ks is None: continue
+            ks_type = ks.get('type')
+            if ks_type == "old":
+                return 1  # error
+            assert ks_type in ("bip32", "hardware"), f"unexpected {ks_type=}"
+            xpub = ks.get('xpub') or None
+            assert xpub is not None
+            assert isinstance(xpub, str)
+            if xpub_type is None:  # first iter
+                xpub_type = xpub[0:4]
+            if xpub[0:4] != xpub_type:
+                return 2  # error
+        # looks okay
+        return 0
+
+    def _convert_version_52(self):
+        if not self._is_upgrade_method_needed(51, 51):
+            return
+        if (error_code := self._detect_insane_version_51()) != 0:
+            # should not get here; get_seed_version should have caught this
+            raise Exception(f'unsupported wallet file: version_51 with error {error_code}')
+        self.data['seed_version'] = 52
+
     def _convert_imported(self):
         if not self._is_upgrade_method_needed(0, 13):
             return
@@ -1035,9 +1121,11 @@ class WalletDB(JsonDB):
             raise WalletFileException('This version of Electrum is too old to open this wallet.\n'
                                       '(highest supported storage version: {}, version of this file: {})'
                                       .format(FINAL_SEED_VERSION, seed_version))
-        if seed_version==14 and self.get('seed_type') == 'segwit':
+        if seed_version == 14 and self.get('seed_type') == 'segwit':
             self._raise_unsupported_version(seed_version)
-        if seed_version >=12:
+        if seed_version == 51 and self._detect_insane_version_51():
+            self._raise_unsupported_version(seed_version)
+        if seed_version >= 12:
             return seed_version
         if seed_version not in [OLD_SEED_VERSION, NEW_SEED_VERSION]:
             self._raise_unsupported_version(seed_version)
@@ -1056,7 +1144,37 @@ class WalletDB(JsonDB):
             else:
                 # creation was complete if electrum was run from source
                 msg += "\nPlease open this file with Electrum 1.9.8, and move your coins to a new wallet."
+        if seed_version == 51:
+            error_code = self._detect_insane_version_51()
+            assert error_code != 0
+            msg += f" ({error_code=})"
+            if error_code == 1:
+                msg += "\nThis is a multisig wallet containing an old_mpk (pre-bip32 master public key)."
+                msg += "\nPlease contact us to help recover it by opening an issue on GitHub."
+            elif error_code == 2:
+                msg += ("\nThis is a multisig wallet containing mixed xpub/Ypub/Zpub."
+                        "\nThe script type is determined by the type of the first keystore."
+                        "\nTo recover, you should re-create the wallet with matching type "
+                        "(converted if needed) master keys."
+                        "\nOr you can contact us to help recover it by opening an issue on GitHub.")
+            else:
+                raise Exception(f"unexpected {error_code=}")
+            raise WalletFileExceptionVersion51(msg, should_report_crash=True)
+        # generic exception
         raise WalletFileException(msg)
+
+    def _add_db_creation_metadata(self):
+        # store this for debugging purposes
+        v = DBMetadata(
+            creation_timestamp=int(time.time()),
+            first_electrum_version_used=ELECTRUM_VERSION,
+        )
+        assert self.get("db_metadata", None) is None
+        self.put("db_metadata", v)
+
+    def get_db_metadata(self) -> Optional[DBMetadata]:
+        # field only present for wallet files created with ver 4.4.0 or later
+        return self.get("db_metadata")
 
     @locked
     def get_txi_addresses(self, tx_hash: str) -> List[str]:
@@ -1453,56 +1571,6 @@ class WalletDB(JsonDB):
         self.tx_fees.clear()
         self._prevouts_by_scripthash.clear()
 
-    def _convert_dict(self, path, key, v):
-        if key == 'transactions':
-            # note: for performance, "deserialize=False" so that we will deserialize these on-demand
-            v = dict((k, tx_from_any(x, deserialize=False)) for k, x in v.items())
-        if key == 'invoices':
-            v = dict((k, Invoice(**x)) for k, x in v.items())
-        if key == 'payment_requests':
-            v = dict((k, Invoice(**x)) for k, x in v.items())
-        elif key == 'adds':
-            v = dict((k, UpdateAddHtlc.from_tuple(*x)) for k, x in v.items())
-        elif key == 'fee_updates':
-            v = dict((k, FeeUpdate(**x)) for k, x in v.items())
-        elif key == 'submarine_swaps':
-            v = dict((k, SwapData(**x)) for k, x in v.items())
-        elif key == 'imported_channel_backups':
-            v = dict((k, ImportedChannelBackupStorage(**x)) for k, x in v.items())
-        elif key == 'onchain_channel_backups':
-            v = dict((k, OnchainChannelBackupStorage(**x)) for k, x in v.items())
-        elif key == 'tx_fees':
-            v = dict((k, TxFeesValue(*x)) for k, x in v.items())
-        elif key == 'prevouts_by_scripthash':
-            v = dict((k, {(prevout, value) for (prevout, value) in x}) for k, x in v.items())
-        elif key == 'buckets':
-            v = dict((k, ShachainElement(bfh(x[0]), int(x[1]))) for k, x in v.items())
-        elif key == 'data_loss_protect_remote_pcp':
-            v = dict((k, bfh(x)) for k, x in v.items())
-        # convert htlc_id keys to int
-        if key in ['adds', 'locked_in', 'settles', 'fails', 'fee_updates', 'buckets',
-                   'unacked_updates', 'unfulfilled_htlcs', 'fail_htlc_reasons', 'onion_keys']:
-            v = dict((int(k), x) for k, x in v.items())
-        # convert keys to HTLCOwner
-        if key == 'log' or (path and path[-1] in ['locked_in', 'fails', 'settles']):
-            if "1" in v:
-                v[LOCAL] = v.pop("1")
-                v[REMOTE] = v.pop("-1")
-        return v
-
-    def _convert_value(self, path, key, v):
-        if key == 'local_config':
-            v = LocalConfig(**v)
-        elif key == 'remote_config':
-            v = RemoteConfig(**v)
-        elif key == 'constraints':
-            v = ChannelConstraints(**v)
-        elif key == 'funding_outpoint':
-            v = Outpoint(**v)
-        elif key == 'channel_type':
-            v = ChannelType(v)
-        return v
-
     def _should_convert_to_stored_dict(self, key) -> bool:
         if key == 'keystore':
             return False
@@ -1510,21 +1578,6 @@ class WalletDB(JsonDB):
         if key in multisig_keystore_names:
             return False
         return True
-
-    def write(self, storage: 'WalletStorage'):
-        with self.lock:
-            self._write(storage)
-
-    @profiler
-    def _write(self, storage: 'WalletStorage'):
-        if threading.current_thread().daemon:
-            self.logger.warning('daemon thread cannot write db')
-            return
-        if not self.modified():
-            return
-        json_str = self.dump(human_readable=not storage.is_encrypted())
-        storage.write(json_str)
-        self.set_modified(False)
 
     def is_ready_to_be_used_by_wallet(self):
         return not self.requires_upgrade() and self._called_after_upgrade_tasks

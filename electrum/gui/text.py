@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Optional
 
 import electrum
 from electrum.gui import BaseElectrumGui
-from electrum import util
+from electrum.bip21 import parse_bip21_URI
 from electrum.util import format_satoshis, format_time
 from electrum.util import EventListener, event_listener
 from electrum.bitcoin import is_address, address_to_script, COIN
@@ -32,19 +32,20 @@ if TYPE_CHECKING:
 
 _ = lambda x:x  # i18n
 
+
 def parse_bip21(text):
     try:
-        return util.parse_URI(text)
-    except:
+        return parse_bip21_URI(text)
+    except Exception:
         return
+
 
 def parse_bolt11(text):
     from electrum.lnaddr import lndecode
     try:
         return lndecode(text)
-    except:
+    except Exception:
         return
-
 
 
 class ElectrumGui(BaseElectrumGui, EventListener):
@@ -52,7 +53,7 @@ class ElectrumGui(BaseElectrumGui, EventListener):
     def __init__(self, *, config: 'SimpleConfig', daemon: 'Daemon', plugins: 'Plugins'):
         BaseElectrumGui.__init__(self, config=config, daemon=daemon, plugins=plugins)
         self.network = daemon.network
-        storage = WalletStorage(config.get_wallet_path())
+        storage = WalletStorage(config.get_wallet_path(use_gui_last_wallet=True))
         if not storage.file_exists():
             print("Wallet not found. try 'electrum create'")
             exit()
@@ -517,6 +518,7 @@ class ElectrumGui(BaseElectrumGui, EventListener):
         pass
 
     def main(self):
+        self.daemon.start_network()
         tty.setraw(sys.stdin)
         try:
             while self.tab != -1:
@@ -557,7 +559,7 @@ class ElectrumGui(BaseElectrumGui, EventListener):
             if not address:
                 return
         message = self.str_recv_description
-        expiry = self.config.get('request_expiry', PR_DEFAULT_EXPIRATION_WHEN_CREATING)
+        expiry = self.config.WALLET_PAYREQ_EXPIRY_SECONDS
         key = self.wallet.create_request(amount_sat, message, expiry, address)
         self.do_clear_request()
         self.pos = self.max_pos
@@ -593,7 +595,7 @@ class ElectrumGui(BaseElectrumGui, EventListener):
     def parse_amount(self, text):
         try:
             x = Decimal(text)
-        except:
+        except Exception:
             return None
         power = pow(10, self.config.get_decimal_point())
         return int(power * x)
@@ -718,7 +720,7 @@ class ElectrumGui(BaseElectrumGui, EventListener):
         srv = 'auto-connect' if auto_connect else str(self.network.default_server)
         out = self.run_dialog('Network', [
             {'label':'server', 'type':'str', 'value':srv},
-            {'label':'proxy', 'type':'str', 'value':self.config.get('proxy', '')},
+            {'label':'proxy', 'type':'str', 'value':self.config.NETWORK_PROXY},
             ], buttons = 1)
         if out:
             if out.get('server'):
@@ -746,7 +748,7 @@ class ElectrumGui(BaseElectrumGui, EventListener):
         if out:
             if out.get('Default fee'):
                 fee = int(Decimal(out['Default fee']) * COIN)
-                self.config.set_key('fee_per_kb', fee, True)
+                self.config.FEE_EST_STATIC_FEERATE_FALLBACK = fee
 
     def password_dialog(self):
         out = self.run_dialog('Password', [

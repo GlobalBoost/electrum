@@ -40,7 +40,8 @@ from electrum.gui.qt.installwizard import InstallWizard
 
 from electrum.i18n import _
 from electrum.logging import Logger
-from electrum.util import parse_URI, InvalidBitcoinURI, UserCancelled, UserFacingException
+from electrum.util import UserCancelled, UserFacingException
+from electrum.bip21 import parse_bip21_URI, InvalidBitcoinURI
 from electrum.plugin import hook, DeviceUnpairableError
 
 from .plugin import OutdatedHwFirmwareException, HW_PluginBase, HardwareHandlerBase
@@ -220,10 +221,11 @@ class QtPluginBase(object):
                 return
             tooltip = self.device + '\n' + (keystore.label or 'unnamed')
             cb = partial(self._on_status_bar_button_click, window=window, keystore=keystore)
-            button = StatusBarButton(read_QIcon(self.icon_unpaired), tooltip, cb)
+            sb = window.statusBar()
+            button = StatusBarButton(read_QIcon(self.icon_unpaired), tooltip, cb, sb.height())
             button.icon_paired = self.icon_paired
             button.icon_unpaired = self.icon_unpaired
-            window.statusBar().addPermanentWidget(button)
+            sb.addPermanentWidget(button)
             handler = self.create_handler(window)
             handler.button = button
             keystore.handler = handler
@@ -283,13 +285,13 @@ class QtPluginBase(object):
                                                               keystore: 'Hardware_KeyStore',
                                                               main_window: ElectrumWindow):
         plugin = keystore.plugin
-        receive_address_e = main_window.receive_tab.receive_address_e
+        receive_tab = main_window.receive_tab
 
         def show_address():
-            addr = str(receive_address_e.text())
+            addr = str(receive_tab.addr)
             keystore.thread.add(partial(plugin.show_address, wallet, addr, keystore))
         dev_name = f"{plugin.device} ({keystore.label})"
-        receive_address_e.addButton("eye1.png", show_address, _("Show on {}").format(dev_name))
+        receive_tab.toolbar_menu.addAction(read_QIcon("eye1.png"), _("Show address on {}").format(dev_name), show_address)
 
     def create_handler(self, window: Union[ElectrumWindow, InstallWizard]) -> 'QtHandlerBase':
         raise NotImplementedError()

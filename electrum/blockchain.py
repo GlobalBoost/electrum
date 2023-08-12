@@ -23,16 +23,17 @@
 import os
 import threading
 import time
-from typing import Optional, Dict, Mapping, Sequence
+from typing import Optional, Dict, Mapping, Sequence, TYPE_CHECKING
 
 from . import util
 from .bitcoin import hash_encode, int_to_hex, rev_hex
 from .crypto import sha256d
 from . import constants
-from .util import bfh, bh2u, with_lock
-from .simple_config import SimpleConfig
+from .util import bfh, with_lock
 from .logging import get_logger, Logger
 
+if TYPE_CHECKING:
+    from .simple_config import SimpleConfig
 
 _logger = get_logger(__name__)
 
@@ -181,7 +182,7 @@ class Blockchain(Logger):
     Manages blockchain headers and their verification
     """
 
-    def __init__(self, config: SimpleConfig, forkpoint: int, parent: Optional['Blockchain'],
+    def __init__(self, config: 'SimpleConfig', forkpoint: int, parent: Optional['Blockchain'],
                  forkpoint_hash: str, prev_hash: Optional[str]):
         assert isinstance(forkpoint_hash, str) and len(forkpoint_hash) == 64, forkpoint_hash
         assert (prev_hash is None) or (isinstance(prev_hash, str) and len(prev_hash) == 64), prev_hash
@@ -296,9 +297,9 @@ class Blockchain(Logger):
     def verify_header(cls, header: dict, prev_hash: str, target: int, expected_header_hash: str=None) -> None:
         _hash = hash_header(header)
         if expected_header_hash and expected_header_hash != _hash:
-            raise Exception("hash mismatches with expected: {} vs {}".format(expected_header_hash, _hash))
+            raise InvalidHeader("hash mismatches with expected: {} vs {}".format(expected_header_hash, _hash))
         if prev_hash != header.get('prev_block_hash'):
-            raise Exception("prev hash mismatch: %s vs %s" % (prev_hash, header.get('prev_block_hash')))
+            raise InvalidHeader("prev hash mismatch: %s vs %s" % (prev_hash, header.get('prev_block_hash')))
         if constants.net.TESTNET:
             return
 
@@ -402,7 +403,7 @@ class Blockchain(Logger):
         # swap parameters
         self.parent, parent.parent = parent.parent, self  # type: Optional[Blockchain], Optional[Blockchain]
         self.forkpoint, parent.forkpoint = parent.forkpoint, self.forkpoint
-        self._forkpoint_hash, parent._forkpoint_hash = parent._forkpoint_hash, hash_raw_header(bh2u(parent_data[:HEADER_SIZE]))
+        self._forkpoint_hash, parent._forkpoint_hash = parent._forkpoint_hash, hash_raw_header(parent_data[:HEADER_SIZE].hex())
         self._prev_hash, parent._prev_hash = parent._prev_hash, self._prev_hash
         # parent's new name
         os.replace(child_old_name, parent.path())
@@ -538,7 +539,7 @@ class Blockchain(Logger):
     def bits_to_target(cls, bits: int) -> int:
         # arith_uint256::SetCompact in Bitcoin Core
         if not (0 <= bits < (1 << 32)):
-            raise Exception(f"bits should be uint32. got {bits!r}")
+            raise InvalidHeader(f"bits should be uint32. got {bits!r}")
         bitsN = (bits >> 24) & 0xff
         bitsBase = bits & 0x7fffff
         if bitsN <= 3:
@@ -547,12 +548,12 @@ class Blockchain(Logger):
             target = bitsBase << (8 * (bitsN-3))
         if target != 0 and bits & 0x800000 != 0:
             # Bit number 24 (0x800000) represents the sign of N
-            raise Exception("target cannot be negative")
+            raise InvalidHeader("target cannot be negative")
         if (target != 0 and
                 (bitsN > 34 or
                  (bitsN > 33 and bitsBase > 0xff) or
                  (bitsN > 32 and bitsBase > 0xffff))):
-            raise Exception("target has overflown")
+            raise InvalidHeader("target has overflown")
         return target
 
     @classmethod
@@ -616,7 +617,7 @@ class Blockchain(Logger):
             return hash_header(header) == constants.net.GENESIS
         try:
             prev_hash = self.get_hash(height - 1)
-        except:
+        except Exception:
             return False
         if prev_hash != header.get('prev_block_hash'):
             return False

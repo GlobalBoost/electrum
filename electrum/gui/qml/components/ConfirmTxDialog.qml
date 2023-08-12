@@ -17,10 +17,7 @@ ElDialog {
     property alias amountLabelText: amountLabel.text
     property alias sendButtonText: sendButton.text
 
-    signal txcancelled
-    signal txaccepted
-
-    title: qsTr('Confirm Transaction')
+    title: qsTr('Transaction Fee')
 
     // copy these to finalizer
     onAddressChanged: finalizer.address = address
@@ -30,12 +27,6 @@ ElDialog {
     height: parent.height
     padding: 0
 
-    modal: true
-    parent: Overlay.overlay
-    Overlay.modal: Rectangle {
-        color: "#aa000000"
-    }
-
     function updateAmountText() {
         btcValue.text = Config.formatSats(finalizer.effectiveAmount, false)
         fiatValue.text = Daemon.fx.enabled
@@ -44,171 +35,172 @@ ElDialog {
     }
 
     ColumnLayout {
-        width: parent.width
-        height: parent.height
+        anchors.fill: parent
         spacing: 0
 
-        GridLayout {
-            width: parent.width
-            columns: 2
-            Layout.leftMargin: constants.paddingLarge
-            Layout.rightMargin: constants.paddingLarge
+        Flickable {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
 
-            Label {
-                id: amountLabel
-                text: qsTr('Amount to send')
-                color: Material.accentColor
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Label {
-                    id: btcValue
-                    font.bold: true
-                }
+            leftMargin: constants.paddingLarge
+            rightMargin: constants.paddingLarge
 
-                Label {
-                    text: Config.baseUnit
-                    color: Material.accentColor
-                }
+            contentHeight: rootLayout.height
+            clip: true
+            interactive: height < contentHeight
+
+            GridLayout {
+                id: rootLayout
+                width: parent.width
+
+                columns: 2
 
                 Label {
-                    id: fiatValue
+                    id: amountLabel
                     Layout.fillWidth: true
-                    font.pixelSize: constants.fontSizeMedium
-                }
-
-                Component.onCompleted: updateAmountText()
-                Connections {
-                    target: finalizer
-                    function onEffectiveAmountChanged() {
-                        updateAmountText()
-                    }
-                }
-            }
-
-            Label {
-                text: qsTr('Mining fee')
-                color: Material.accentColor
-            }
-
-            FormattedAmount {
-                amount: finalizer.fee
-            }
-
-            Label {
-                visible: !finalizer.extraFee.isEmpty
-                text: qsTr('Extra fee')
-                color: Material.accentColor
-            }
-
-            FormattedAmount {
-                visible: !finalizer.extraFee.isEmpty
-                amount: finalizer.extraFee
-            }
-
-            Label {
-                text: qsTr('Fee rate')
-                color: Material.accentColor
-            }
-
-            RowLayout {
-                Label {
-                    id: feeRate
-                    text: finalizer.feeRate
-                    font.family: FixedFont
-                }
-
-                Label {
-                    text: 'sat/vB'
+                    Layout.minimumWidth: implicitWidth
+                    text: qsTr('Amount to send')
                     color: Material.accentColor
                 }
-            }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        id: btcValue
+                        font.bold: true
+                        font.family: FixedFont
+                    }
 
-            Label {
-                text: qsTr('Target')
-                color: Material.accentColor
-            }
+                    Label {
+                        text: Config.baseUnit
+                        color: Material.accentColor
+                    }
 
-            Label {
-                id: targetdesc
-                text: finalizer.target
-            }
+                    Label {
+                        id: fiatValue
+                        Layout.fillWidth: true
+                        font.pixelSize: constants.fontSizeMedium
+                    }
 
-            Slider {
-                id: feeslider
-                leftPadding: constants.paddingMedium
-                snapMode: Slider.SnapOnRelease
-                stepSize: 1
-                from: 0
-                to: finalizer.sliderSteps
-                onValueChanged: {
-                    if (activeFocus)
-                        finalizer.sliderPos = value
-                }
-                Component.onCompleted: {
-                    value = finalizer.sliderPos
-                }
-                Connections {
-                    target: finalizer
-                    function onSliderPosChanged() {
-                        feeslider.value = finalizer.sliderPos
+                    Component.onCompleted: updateAmountText()
+                    Connections {
+                        target: finalizer
+                        function onEffectiveAmountChanged() {
+                            updateAmountText()
+                        }
                     }
                 }
-            }
 
-            FeeMethodComboBox {
-                id: target
-                feeslider: finalizer
-            }
+                Label {
+                    text: qsTr('Mining fee')
+                    color: Material.accentColor
+                }
 
-            InfoTextArea {
-                Layout.columnSpan: 2
-                Layout.preferredWidth: parent.width * 3/4
-                Layout.alignment: Qt.AlignHCenter
-                visible: finalizer.warning != ''
-                text: finalizer.warning
-                iconStyle: InfoTextArea.IconStyle.Warn
-            }
+                FormattedAmount {
+                    amount: finalizer.fee
+                }
 
-            Label {
-                text: qsTr('Outputs')
-                Layout.columnSpan: 2
-                color: Material.accentColor
-            }
+                Label {
+                    visible: !finalizer.extraFee.isEmpty
+                    text: qsTr('Extra fee')
+                    color: Material.accentColor
+                }
 
-            Repeater {
-                model: finalizer.outputs
-                delegate: TextHighlightPane {
+                FormattedAmount {
+                    visible: !finalizer.extraFee.isEmpty
+                    amount: finalizer.extraFee
+                }
+
+                Label {
+                    text: qsTr('Fee rate')
+                    color: Material.accentColor
+                }
+
+                RowLayout {
+                    Label {
+                        id: feeRate
+                        text: finalizer.feeRate
+                        font.family: FixedFont
+                    }
+
+                    Label {
+                        text: 'sat/vB'
+                        color: Material.accentColor
+                    }
+                }
+
+                Label {
+                    text: qsTr('Target')
+                    color: Material.accentColor
+                }
+
+                Label {
+                    id: targetdesc
+                    text: finalizer.target
+                }
+
+                RowLayout {
                     Layout.columnSpan: 2
                     Layout.fillWidth: true
-                    padding: 0
-                    leftPadding: constants.paddingSmall
-                    RowLayout {
-                        width: parent.width
-                        Label {
-                            text: modelData.address
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            font.pixelSize: constants.fontSizeLarge
-                            font.family: FixedFont
-                            color: modelData.is_mine ? constants.colorMine : Material.foreground
+
+                    Slider {
+                        id: feeslider
+                        Layout.fillWidth: true
+                        leftPadding: constants.paddingMedium
+
+                        snapMode: Slider.SnapOnRelease
+                        stepSize: 1
+                        from: 0
+                        to: finalizer.sliderSteps
+
+                        onValueChanged: {
+                            if (activeFocus)
+                                finalizer.sliderPos = value
                         }
-                        Label {
-                            text: Config.formatSats(modelData.value_sats)
-                            font.pixelSize: constants.fontSizeMedium
-                            font.family: FixedFont
+                        Component.onCompleted: {
+                            value = finalizer.sliderPos
                         }
-                        Label {
-                            text: Config.baseUnit
-                            font.pixelSize: constants.fontSizeMedium
-                            color: Material.accentColor
+                        Connections {
+                            target: finalizer
+                            function onSliderPosChanged() {
+                                feeslider.value = finalizer.sliderPos
+                            }
                         }
+                    }
+
+                    FeeMethodComboBox {
+                        id: target
+                        feeslider: finalizer
+                    }
+                }
+
+                InfoTextArea {
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    Layout.topMargin: constants.paddingLarge
+                    Layout.bottomMargin: constants.paddingLarge
+                    visible: finalizer.warning != ''
+                    text: finalizer.warning
+                    iconStyle: InfoTextArea.IconStyle.Warn
+                }
+
+                Label {
+                    text: qsTr('Outputs')
+                    Layout.columnSpan: 2
+                    color: Material.accentColor
+                }
+
+                Repeater {
+                    model: finalizer.outputs
+                    delegate: TxOutput {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+
+                        allowShare: false
+                        model: modelData
                     }
                 }
             }
         }
-
-        Item { Layout.fillHeight: true; Layout.preferredWidth: 1 }
 
         FlatButton {
             id: sendButton
@@ -218,12 +210,9 @@ ElDialog {
                     : qsTr('Pay')
             icon.source: '../../icons/confirmed.png'
             enabled: finalizer.valid
-            onClicked: {
-                txaccepted()
-                dialog.close()
-            }
+            onClicked: doAccept()
         }
     }
 
-    onClosed: txcancelled()
+    onClosed: doReject()
 }

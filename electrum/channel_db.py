@@ -38,7 +38,7 @@ from aiorpcx import NetAddress
 
 from .sql_db import SqlDB, sql
 from . import constants, util
-from .util import bh2u, profiler, get_headers_dir, is_ip_address, json_normalize
+from .util import profiler, get_headers_dir, is_ip_address, json_normalize, UserFacingException
 from .logging import Logger
 from .lnutil import (LNPeerAddr, format_short_channel_id, ShortChannelID,
                      validate_features, IncompatibleOrInsaneFeatures, InvalidGossipMsg)
@@ -59,6 +59,9 @@ FLAG_DISABLE   = 1 << 1
 FLAG_DIRECTION = 1 << 0
 
 
+class ChannelDBNotLoaded(UserFacingException): pass
+
+
 class ChannelInfo(NamedTuple):
     short_channel_id: ShortChannelID
     node1_id: bytes
@@ -68,7 +71,7 @@ class ChannelInfo(NamedTuple):
     @staticmethod
     def from_msg(payload: dict) -> 'ChannelInfo':
         features = int.from_bytes(payload['features'], 'big')
-        validate_features(features)
+        features = validate_features(features)
         channel_id = payload['short_channel_id']
         node_id_1 = payload['node_id_1']
         node_id_2 = payload['node_id_2']
@@ -164,7 +167,7 @@ class NodeInfo(NamedTuple):
     def from_msg(payload) -> Tuple['NodeInfo', Sequence['LNPeerAddr']]:
         node_id = payload['node_id']
         features = int.from_bytes(payload['features'], "big")
-        validate_features(features)
+        features = validate_features(features)
         addresses = NodeInfo.parse_addresses_field(payload['addresses'])
         peer_addrs = []
         for host, port in addresses:
@@ -175,7 +178,7 @@ class NodeInfo(NamedTuple):
         alias = payload['alias'].rstrip(b'\x00')
         try:
             alias = alias.decode('utf8')
-        except:
+        except Exception:
             alias = ''
         timestamp = payload['timestamp']
         node_info = NodeInfo(node_id=node_id, features=features, timestamp=timestamp, alias=alias)
@@ -375,7 +378,7 @@ class ChannelDB(SqlDB):
 
     def get_recent_peers(self):
         if not self.data_loaded.is_set():
-            raise Exception("channelDB data not loaded yet!")
+            raise ChannelDBNotLoaded("channelDB data not loaded yet!")
         with self.lock:
             ret = [self.get_last_good_address(node_id)
                    for node_id in self._recent_peers]
@@ -396,7 +399,7 @@ class ChannelDB(SqlDB):
             if short_channel_id in self._channels:
                 continue
             if constants.net.rev_genesis_bytes() != msg['chain_hash']:
-                self.logger.info("ChanAnn has unexpected chain_hash {}".format(bh2u(msg['chain_hash'])))
+                self.logger.info("ChanAnn has unexpected chain_hash {}".format(msg['chain_hash'].hex()))
                 continue
             try:
                 channel_info = ChannelInfo.from_msg(msg)
@@ -842,7 +845,7 @@ class ChannelDB(SqlDB):
     ) -> Set[ShortChannelID]:
         """Returns the set of short channel IDs where node_id is one of the channel participants."""
         if not self.data_loaded.is_set():
-            raise Exception("channelDB data not loaded yet!")
+            raise ChannelDBNotLoaded("channelDB data not loaded yet!")
         relevant_channels = self._channels_for_node.get(node_id) or set()
         relevant_channels = set(relevant_channels)  # copy
         # add our own channels  # TODO maybe slow?

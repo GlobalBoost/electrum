@@ -1,5 +1,6 @@
 import sys
 import json
+from typing import TYPE_CHECKING
 
 from aiohttp.client_exceptions import ClientError
 from kivy import base, utils
@@ -14,6 +15,9 @@ from electrum.gui.kivy.i18n import _
 
 from electrum.base_crash_reporter import BaseCrashReporter, EarlyExceptionsQueue
 from electrum.logging import Logger
+
+if TYPE_CHECKING:
+    from electrum.gui.kivy.main_window import ElectrumWindow
 
 
 Builder.load_string('''
@@ -95,7 +99,7 @@ class CrashReporter(BaseCrashReporter, Factory.Popup):
  * Locale: {locale}
         """
 
-    def __init__(self, main_window, exctype, value, tb):
+    def __init__(self, main_window: 'ElectrumWindow', exctype, value, tb):
         BaseCrashReporter.__init__(self, exctype, value, tb)
         Factory.Popup.__init__(self)
         self.main_window = main_window
@@ -121,16 +125,16 @@ class CrashReporter(BaseCrashReporter, Factory.Popup):
             loop = self.main_window.network.asyncio_loop
             proxy = self.main_window.network.proxy
             # FIXME network request in GUI thread...
-            response = json.loads(BaseCrashReporter.send_report(self, loop, proxy,
-                                                                "/crash.json", timeout=10))
-        except (ValueError, ClientError) as e:
+            response = BaseCrashReporter.send_report(self, loop, proxy, timeout=10)
+        except Exception as e:
             self.logger.warning(f"Error sending crash report. exc={e!r}")
             self.show_popup(_('Unable to send report'), _("Please check your network connection."))
         else:
-            self.show_popup(_('Report sent'), response["text"])
-            location = response["location"]
-            if location:
-                self.logger.info(f"Crash report sent. location={location!r}")
+            text = response.text
+            if response.url:
+                text += f" You can track further progress on GitHub."
+            self.show_popup(_('Report sent'), text)
+            if location := response.url:
                 self.open_url(location)
         self.dismiss()
 
@@ -156,7 +160,7 @@ class CrashReporter(BaseCrashReporter, Factory.Popup):
         currentActivity.startActivity(browserIntent)
 
     def show_never(self):
-        self.main_window.electrum_config.set_key(BaseCrashReporter.config_key, False)
+        self.main_window.electrum_config.SHOW_CRASH_REPORTER = False
         self.dismiss()
 
     def get_user_description(self):
@@ -175,11 +179,11 @@ class CrashReportDetails(Factory.Popup):
 
 
 class ExceptionHook(base.ExceptionHandler, Logger):
-    def __init__(self, main_window):
+    def __init__(self, main_window: 'ElectrumWindow'):
         base.ExceptionHandler.__init__(self)
         Logger.__init__(self)
         self.main_window = main_window
-        if not main_window.electrum_config.get(BaseCrashReporter.config_key, default=True):
+        if not main_window.electrum_config.SHOW_CRASH_REPORTER:
             EarlyExceptionsQueue.set_hook_as_ready()  # flush already queued exceptions
             return
         # For exceptions in Kivy:

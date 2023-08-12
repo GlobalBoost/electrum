@@ -94,7 +94,7 @@ Builder.load_string('''
                     status: _('Yes') if (app.use_recoverable_channels and not self.disabled) else _('No')
                     title: _('Create recoverable channels') + ': ' + self.status
                     description: _("Add channel recovery data to funding transaction.")
-                    message: _(messages.MSG_RECOVERABLE_CHANNELS)
+                    message: messages.MSG_RECOVERABLE_CHANNELS
                     action: partial(root.boolean_dialog, 'use_recoverable_channels', _('Create recoverable channels'), self.message)
                 CardSeparator
                 SettingsItem:
@@ -146,7 +146,7 @@ class SettingsDialog(Factory.Popup):
         self.enable_toggle_use_recoverable_channels = bool(self.wallet.lnworker and self.wallet.lnworker.can_have_recoverable_channels())
 
     def get_language_name(self) -> str:
-        lang = self.config.get('language') or ''
+        lang = self.config.LOCALIZATION_LANGUAGE
         return languages.get(lang) or languages.get('') or ''
 
     def change_password(self, dt):
@@ -157,9 +157,9 @@ class SettingsDialog(Factory.Popup):
 
     def language_dialog(self, item, dt):
         if self._language_dialog is None:
-            l = self.config.get('language') or ''
+            l = self.config.LOCALIZATION_LANGUAGE
             def cb(key):
-                self.config.set_key("language", key, True)
+                self.config.LOCALIZATION_LANGUAGE = key
                 item.lang = self.get_language_name()
                 self.app.language = key
             self._language_dialog = ChoiceDialog(_('Language'), languages, l, cb)
@@ -175,7 +175,7 @@ class SettingsDialog(Factory.Popup):
         self._unit_dialog.open()
 
     def routing_dialog(self, item, dt):
-        description = _(messages.MSG_HELP_TRAMPOLINE)
+        description = messages.MSG_HELP_TRAMPOLINE
         def cb(text):
             self.app.use_gossip = (text == 'Gossip')
         dialog = ChoiceDialog(
@@ -194,7 +194,7 @@ class SettingsDialog(Factory.Popup):
             choosers = sorted(coinchooser.COIN_CHOOSERS.keys())
             chooser_name = coinchooser.get_name(self.config)
             def cb(text):
-                self.config.set_key('coin_chooser', text)
+                self.config.WALLET_COIN_CHOOSER_POLICY = text
                 item.status = text
             self._coinselect_dialog = ChoiceDialog(_('Coin selection'), choosers, chooser_name, cb)
         self._coinselect_dialog.open()

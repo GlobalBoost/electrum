@@ -41,13 +41,11 @@ from electrum.interface import ServerAddr, PREFERRED_NETWORK_PROTOCOL
 from electrum.network import Network
 from electrum.logging import get_logger
 from electrum.util import detect_tor_socks_proxy
+from electrum.simple_config import SimpleConfig
 
 from .util import (Buttons, CloseButton, HelpButton, read_QIcon, char_width_in_lineedit,
                    PasswordLineEdit)
 from .util import QtEventListener, qt_event_listener
-
-if TYPE_CHECKING:
-    from electrum.simple_config import SimpleConfig
 
 
 _logger = get_logger(__name__)
@@ -116,7 +114,7 @@ class NodesListWidget(QTreeWidget):
         elif item_type == self.ItemType.DISCONNECTED_SERVER:
             server = item.data(0, self.SERVER_ADDR_ROLE)  # type: ServerAddr
             def func():
-                self.parent.server_e.setText(server.net_addr_str())
+                self.parent.server_e.setText(str(server))
                 self.parent.set_server()
             menu.addAction(_("Use as server"), func)
         elif item_type == self.ItemType.CHAIN:
@@ -157,11 +155,12 @@ class NodesListWidget(QTreeWidget):
             else:
                 x = connected_servers_item
             for i in interfaces:
-                star = ' *' if i == network.interface else ''
-                item = QTreeWidgetItem([f"{i.server.to_friendly_name()}" + star, '%d'%i.tip])
+                item = QTreeWidgetItem([f"{i.server.to_friendly_name()}", '%d'%i.tip])
                 item.setData(0, self.ITEMTYPE_ROLE, self.ItemType.CONNECTED_SERVER)
                 item.setData(0, self.SERVER_ADDR_ROLE, i.server)
                 item.setToolTip(0, str(i.server))
+                if i == network.interface:
+                    item.setIcon(0, read_QIcon("chevron-right.png"))
                 x.addChild(item)
             if n_chains > 1:
                 connected_servers_item.addChild(x)
@@ -278,7 +277,7 @@ class NetworkChoiceLayout(object):
         grid.addWidget(HelpButton(msg), 0, 4)
 
         self.autoconnect_cb = QCheckBox(_('Select server automatically'))
-        self.autoconnect_cb.setEnabled(self.config.is_modifiable('auto_connect'))
+        self.autoconnect_cb.setEnabled(self.config.cv.NETWORK_AUTO_CONNECT.is_modifiable())
         self.autoconnect_cb.clicked.connect(self.set_server)
         self.autoconnect_cb.clicked.connect(self.update)
         msg = ' '.join([
@@ -326,13 +325,13 @@ class NetworkChoiceLayout(object):
             self.td = None
 
     def check_disable_proxy(self, b):
-        if not self.config.is_modifiable('proxy'):
+        if not self.config.cv.NETWORK_PROXY.is_modifiable():
             b = False
         for w in [self.proxy_mode, self.proxy_host, self.proxy_port, self.proxy_user, self.proxy_password]:
             w.setEnabled(b)
 
     def enable_set_server(self):
-        if self.config.is_modifiable('server'):
+        if self.config.cv.NETWORK_SERVER.is_modifiable():
             enabled = not self.autoconnect_cb.isChecked()
             self.server_e.setEnabled(enabled)
         else:
@@ -349,9 +348,7 @@ class NetworkChoiceLayout(object):
 
         height_str = "%d "%(self.network.get_local_height()) + _('blocks')
         self.height_label.setText(height_str)
-        n = len(self.network.get_interfaces())
-        status = _("Connected to {0} nodes.").format(n) if n > 1 else _("Connected to {0} node.").format(n) if n == 1 else _("Not connected")
-        self.status_label.setText(status)
+        self.status_label.setText(self.network.get_status())
         chains = self.network.get_blockchains()
         if len(chains) > 1:
             chain = self.network.blockchain()

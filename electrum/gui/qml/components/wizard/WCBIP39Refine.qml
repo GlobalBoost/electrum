@@ -1,9 +1,11 @@
 import QtQuick 2.6
 import QtQuick.Layouts 1.0
 import QtQuick.Controls 2.1
+import QtQuick.Controls.Material 2.0
 
 import org.electrum 1.0
 
+import ".."
 import "../controls"
 
 WizardComponent {
@@ -41,11 +43,24 @@ WizardComponent {
 
     function validate() {
         valid = false
+        validationtext.text = ''
+
         var p = isMultisig ? getMultisigScriptTypePurposeDict() : getScriptTypePurposeDict()
         if (!scripttypegroup.checkedButton.scripttype in p)
             return
         if (!bitcoin.verifyDerivationPath(derivationpathtext.text))
             return
+
+        if (isMultisig && cosigner) {
+            apply()
+            if (wiz.hasDuplicateMasterKeys(wizard_data)) {
+                validationtext.text = qsTr('Error: duplicate master public key')
+                return
+            } else if (wiz.hasHeterogeneousMasterKeys(wizard_data)) {
+                validationtext.text = qsTr('Error: master public key types do not match')
+                return
+            }
+        }
         valid = true
     }
 
@@ -84,15 +99,6 @@ WizardComponent {
             width: parent.width
 
             Label {
-                text: qsTr('Script type and Derivation path')
-            }
-            Button {
-                text: qsTr('Detect Existing Accounts')
-                enabled: false
-                visible: !isMultisig
-            }
-
-            Label {
                 text: qsTr('Choose the type of addresses in your wallet.')
             }
 
@@ -123,38 +129,93 @@ WizardComponent {
                 property string scripttype: 'p2sh'
                 text: qsTr('legacy multisig (p2sh)')
                 visible: isMultisig
+                enabled: !cosigner || wizard_data['script_type'] == 'p2sh'
+                checked: cosigner ? wizard_data['script_type'] == 'p2sh' : false
             }
             RadioButton {
                 ButtonGroup.group: scripttypegroup
                 property string scripttype: 'p2wsh-p2sh'
                 text: qsTr('p2sh-segwit multisig (p2wsh-p2sh)')
                 visible: isMultisig
+                enabled: !cosigner || wizard_data['script_type'] == 'p2wsh-p2sh'
+                checked: cosigner ? wizard_data['script_type'] == 'p2wsh-p2sh' : false
             }
             RadioButton {
                 ButtonGroup.group: scripttypegroup
                 property string scripttype: 'p2wsh'
-                checked: isMultisig
                 text: qsTr('native segwit multisig (p2wsh)')
                 visible: isMultisig
+                enabled: !cosigner || wizard_data['script_type'] == 'p2wsh'
+                checked: cosigner ? wizard_data['script_type'] == 'p2wsh' : isMultisig
             }
 
             InfoTextArea {
-                Layout.preferredWidth: parent.width
+                Layout.fillWidth: true
                 text: qsTr('You can override the suggested derivation path.') + ' ' +
                     qsTr('If you are not sure what this is, leave this field unchanged.')
+            }
+
+            Label {
+                text: qsTr('Derivation path')
             }
 
             TextField {
                 id: derivationpathtext
                 Layout.fillWidth: true
-                placeholderText: qsTr('Derivation path')
+                Layout.leftMargin: constants.paddingMedium
                 onTextChanged: validate()
             }
+
+            InfoTextArea {
+                id: validationtext
+                Layout.fillWidth: true
+                visible: text
+                iconStyle: InfoTextArea.IconStyle.Error
+            }
+
+            Pane {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: constants.paddingLarge
+                padding: 0
+                visible: !isMultisig
+                background: Rectangle {
+                    color: Qt.lighter(Material.dialogColor, 1.5)
+                }
+
+                FlatButton {
+                    text: qsTr('Detect Existing Accounts')
+                    onClicked: {
+                        var dialog = bip39recoveryDialog.createObject(mainLayout, {
+                            walletType: wizard_data['wallet_type'],
+                            seed: wizard_data['seed'],
+                            seedExtraWords: wizard_data['seed_extra_words']
+                        })
+                        dialog.accepted.connect(function () {
+                            // select matching script type button and set derivation path
+                            for (var i = 0; i < scripttypegroup.buttons.length; i++) {
+                                var btn = scripttypegroup.buttons[i]
+                                if (btn.visible && btn.scripttype == dialog.scriptType) {
+                                    btn.checked = true
+                                    derivationpathtext.text = dialog.derivationPath
+                                    return
+                                }
+                            }
+                        })
+                        dialog.open()
+                    }
+                }
+            }
+
         }
     }
 
     Bitcoin {
         id: bitcoin
+    }
+
+    Component {
+        id: bip39recoveryDialog
+        BIP39RecoveryDialog { }
     }
 
     Component.onCompleted: {
@@ -163,6 +224,7 @@ WizardComponent {
             participants = wizard_data['multisig_participants']
             if ('multisig_current_cosigner' in wizard_data)
                 cosigner = wizard_data['multisig_current_cosigner']
+            validate()
         }
     }
 }

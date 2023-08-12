@@ -31,7 +31,7 @@ from threading import RLock
 import attr
 from math import inf
 
-from .util import profiler, with_lock, bh2u
+from .util import profiler, with_lock
 from .logging import Logger
 from .lnutil import (NUM_MAX_EDGES_IN_PAYMENT_PATH, ShortChannelID, LnFeatures,
                      NBLOCK_CLTV_EXPIRY_TOO_FAR_INTO_FUTURE)
@@ -153,6 +153,9 @@ def is_route_sane_to_use(route: LNPaymentRoute, invoice_amount_msat: int, min_fi
     # TODO revise ad-hoc heuristics
     if cltv > NBLOCK_CLTV_EXPIRY_TOO_FAR_INTO_FUTURE:
         return False
+    # FIXME in case of MPP, the fee checks are done independently for each part,
+    #       which is ok for the proportional checks but not for the absolute ones.
+    #       This is not that big of a deal though as we don't split into *too many* parts.
     if not is_fee_sane(total_fee, payment_amount_msat=invoice_amount_msat):
         return False
     return True
@@ -489,6 +492,12 @@ class LNPathFinder(Logger):
         route_edge = private_route_edges.get(short_channel_id, None)
         if route_edge is None:
             node_info = self.channel_db.get_node_info_for_node_id(node_id=end_node)
+            if node_info:
+                # it's ok if we are missing the node_announcement (node_info) for this node,
+                # but if we have it, we enforce that they support var_onion_optin
+                node_features = LnFeatures(node_info.features)
+                if not node_features.supports(LnFeatures.VAR_ONION_OPT):  # note: this is kind of slow. could be cached.
+                    return float('inf'), 0
             route_edge = RouteEdge.from_channel_policy(
                 channel_policy=channel_policy,
                 short_channel_id=short_channel_id,

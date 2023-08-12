@@ -14,12 +14,13 @@ from kivy.properties import StringProperty
 
 from electrum.invoices import (PR_DEFAULT_EXPIRATION_WHEN_CREATING,
                                PR_PAID, PR_UNKNOWN, PR_EXPIRED, PR_INFLIGHT,
-                               pr_expiration_values, Invoice)
+                               pr_expiration_values, Invoice, Request)
 from electrum import bitcoin, constants
 from electrum import lnutil
 from electrum.transaction import tx_from_any, PartialTxOutput
-from electrum.util import (parse_URI, InvalidBitcoinURI, TxMinedInfo, maybe_extract_lightning_payment_identifier,
-                           InvoiceError, format_time, parse_max_spend, BITCOIN_BIP21_URI_SCHEME)
+from electrum.util import TxMinedInfo, InvoiceError, format_time, parse_max_spend
+from electrum.bip21 import BITCOIN_BIP21_URI_SCHEME, parse_bip21_URI, InvalidBitcoinURI
+from electrum.payment_identifier import maybe_extract_lightning_payment_identifier
 from electrum.lnaddr import lndecode, LnInvoiceException
 from electrum.lnurl import decode_lnurl, request_lnurl, callback_lnurl, LNURLError, LNURL6Data
 from electrum.logging import Logger
@@ -126,9 +127,12 @@ class HistoryScreen(CScreen):
             fee_text = '' if fee is None else 'fee: %d sat'%fee
         else:
             tx_hash = tx_item['txid']
-            tx_mined_info = TxMinedInfo(height=tx_item['height'],
-                                        conf=tx_item['confirmations'],
-                                        timestamp=tx_item['timestamp'])
+            tx_mined_info = TxMinedInfo(
+                height=tx_item['height'],
+                conf=tx_item['confirmations'],
+                timestamp=tx_item['timestamp'],
+                wanted_height=tx_item.get('wanted_height', None),
+            )
             status, status_str = self.app.wallet.get_tx_status(tx_hash, tx_mined_info)
             icon = f'atlas://{KIVY_GUI_PATH}/theming/atlas/light/' + TX_ICONS[status]
             message = tx_item['label'] or tx_hash
@@ -205,7 +209,7 @@ class SendScreen(CScreen, Logger):
 
     def set_bip21(self, text: str):
         try:
-            uri = parse_URI(text, self.app.on_pr, loop=self.app.asyncio_loop)
+            uri = parse_bip21_URI(text) # bip70 not supported
         except InvalidBitcoinURI as e:
             self.app.show_info(_("Error parsing URI") + f":\n{e}")
             return
@@ -338,7 +342,7 @@ class SendScreen(CScreen, Logger):
         else:
             try:
                 amount_sat = self.app.get_amount(self.amount)
-            except:
+            except Exception:
                 self.app.show_error(_('Invalid amount') + ':\n' + self.amount)
                 return
         message = self.message
@@ -381,7 +385,7 @@ class SendScreen(CScreen, Logger):
         assert self.lnurl_data
         try:
             amount = self.app.get_amount(self.amount)
-        except:
+        except Exception:
             self.app.show_error(_('Invalid amount') + ':\n' + self.amount)
             return
         if not (self.lnurl_data.min_sendable_sat <= amount <= self.lnurl_data.max_sendable_sat):
@@ -477,7 +481,7 @@ class ReceiveScreen(CScreen):
         self.expiration_text = pr_expiration_values[c]
 
     def expiry(self):
-        return self.app.electrum_config.get('request_expiry', PR_DEFAULT_EXPIRATION_WHEN_CREATING)
+        return self.app.electrum_config.WALLET_PAYREQ_EXPIRY_SECONDS
 
     def clear(self):
         self.address = ''
@@ -536,12 +540,12 @@ class ReceiveScreen(CScreen):
         self.update()
         self.app.show_request(key)
 
-    def get_card(self, req: Invoice) -> Dict[str, Any]:
+    def get_card(self, req: Request) -> Dict[str, Any]:
         is_lightning = req.is_lightning()
         if not is_lightning:
             address = req.get_address()
         else:
-            address = req.lightning_invoice
+            address = self.app.wallet.get_bolt11_invoice(req)
         key = req.get_id()
         amount = req.get_amount_sat()
         description = req.message
@@ -584,7 +588,7 @@ class ReceiveScreen(CScreen):
     def expiration_dialog(self, obj):
         from .dialogs.choice_dialog import ChoiceDialog
         def callback(c):
-            self.app.electrum_config.set_key('request_expiry', c)
+            self.app.electrum_config.WALLET_PAYREQ_EXPIRY_SECONDS = c
             self.expiration_text = pr_expiration_values[c]
         d = ChoiceDialog(_('Expiration date'), pr_expiration_values, self.expiry(), callback)
         d.open()

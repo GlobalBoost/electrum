@@ -1,9 +1,10 @@
 # If you want Electrum to appear in a Linux app launcher ("start menu"), install this by doing:
 # sudo desktop-file-install electrum-bsty.desktop
+# Note: This assumes $HOME/.local/bin is in your $PATH
 
 [Desktop Entry]
 Comment=Lightweight GlobalBoost Client
-Exec=sh -c "PATH=\"\\$HOME/.local/bin:\\$PATH\"; electrum-bsty %u"
+Exec=electrum-bsty %u
 GenericName[en_US]=GlobalBoost Wallet
 GenericName=GlobalBoost Wallet
 Icon=electrum-bsty
@@ -18,5 +19,5 @@ MimeType=x-scheme-handler/globalBoost;x-scheme-handler/lightning;
 Actions=Testnet;
 
 [Desktop Action Testnet]
-Exec=sh -c "PATH=\"\\$HOME/.local/bin:\\$PATH\"; electrum-bsty --testnet %u"
+Exec=electrum-bsty --testnet %u
 Name=Testnet mode

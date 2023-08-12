@@ -57,7 +57,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.bottomMargin: constants.paddingLarge
 
-                ListView {
+                ElListView {
                     id: serversListView
                     anchors.fill: parent
                     model: Network.serverListModel
@@ -93,7 +93,7 @@ Item {
 
     Component.onCompleted: {
         root.auto_connect = Config.autoConnectDefined ? Config.autoConnect : false
-        root.address = Config.serverString ? Config.serverString : Network.server
+        root.address = Network.server
         // TODO: initial setup should not connect already, is Network.server defined?
     }
 }

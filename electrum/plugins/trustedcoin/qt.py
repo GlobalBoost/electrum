@@ -103,8 +103,9 @@ class Plugin(TrustedCoinPlugin):
         else:
             action = partial(self.settings_dialog, window)
             icon = read_QIcon("trustedcoin-status.png")
-        button = StatusBarButton(icon, _("TrustedCoin"), action)
-        window.statusBar().addPermanentWidget(button)
+        sb = window.statusBar()
+        button = StatusBarButton(icon, _("TrustedCoin"), action, sb.height())
+        sb.addPermanentWidget(button)
         self.start_request_thread(window.wallet)
 
     def auth_dialog(self, window):
@@ -207,7 +208,9 @@ class Plugin(TrustedCoinPlugin):
             grid.addWidget(QLabel(window.format_amount(v/k) + ' ' + window.base_unit() + "/tx"), i, 1)
             b = QRadioButton()
             b.setChecked(k == n_prepay)
-            b.clicked.connect(lambda b, k=k: self.config.set_key('trustedcoin_prepay', k, True))
+            def on_click(b, k):
+                self.config.PLUGIN_TRUSTEDCOIN_NUM_PREPAY = k
+            b.clicked.connect(partial(on_click, k=k))
             grid.addWidget(b, i, 2)
             i += 1
 
