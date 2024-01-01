@@ -4,7 +4,7 @@ import time
 import os
 import stat
 from decimal import Decimal
-from typing import Union, Optional, Dict, Sequence, Tuple, Any, Set
+from typing import Union, Optional, Dict, Sequence, Tuple, Any, Set, Callable
 from numbers import Real
 from functools import cached_property
 
@@ -34,7 +34,6 @@ FEERATE_DEFAULT_RELAY = 1000
 FEERATE_MAX_RELAY = 50000
 FEERATE_STATIC_VALUES = [1000, 2000, 5000, 10000, 20000, 30000,
                          50000, 70000, 100000, 150000, 200000, 300000]
-FEERATE_REGTEST_HARDCODED = 180000  # for eclair compat
 
 # The min feerate_per_kw that can be used in lightning so that
 # the resulting onchain tx pays the min relay fee.
@@ -52,25 +51,49 @@ _logger = get_logger(__name__)
 FINAL_CONFIG_VERSION = 3
 
 
+_config_var_from_key = {}  # type: Dict[str, 'ConfigVar']
+
+
 class ConfigVar(property):
 
-    def __init__(self, key: str, *, default, type_=None):
+    def __init__(
+        self,
+        key: str,
+        *,
+        default: Union[Any, Callable[['SimpleConfig'], Any]],  # typically a literal, but can also be a callable
+        type_=None,
+        short_desc: Callable[[], str] = None,
+        long_desc: Callable[[], str] = None,
+    ):
         self._key = key
         self._default = default
         self._type = type_
+        # note: the descriptions are callables instead of str literals, to delay evaluating the _() translations
+        #       until after the language is set.
+        assert short_desc is None or callable(short_desc)
+        assert long_desc is None or callable(long_desc)
+        self._short_desc = short_desc
+        self._long_desc = long_desc
         property.__init__(self, self._get_config_value, self._set_config_value)
+        assert key not in _config_var_from_key, f"duplicate config key str: {key!r}"
+        _config_var_from_key[key] = self
 
     def _get_config_value(self, config: 'SimpleConfig'):
-        value = config.get(self._key, default=self._default)
-        if self._type is not None and value != self._default:
-            assert value is not None, f"got None for key={self._key!r}"
-            try:
-                value = self._type(value)
-            except Exception as e:
-                raise ValueError(
-                    f"ConfigVar.get type-check and auto-conversion failed. "
-                    f"key={self._key!r}. type={self._type}. value={value!r}") from e
-        return value
+        with config.lock:
+            if config.is_set(self._key):
+                value = config.get(self._key)
+                if self._type is not None:
+                    assert value is not None, f"got None for key={self._key!r}"
+                    try:
+                        value = self._type(value)
+                    except Exception as e:
+                        raise ValueError(
+                            f"ConfigVar.get type-check and auto-conversion failed. "
+                            f"key={self._key!r}. type={self._type}. value={value!r}") from e
+            else:
+                d = self._default
+                value = d(config) if callable(d) else d
+            return value
 
     def _set_config_value(self, config: 'SimpleConfig', value, *, save=True):
         if self._type is not None and value is not None:
@@ -86,12 +109,20 @@ class ConfigVar(property):
     def get_default_value(self) -> Any:
         return self._default
 
+    def get_short_desc(self) -> Optional[str]:
+        desc = self._short_desc
+        return desc() if desc else None
+
+    def get_long_desc(self) -> Optional[str]:
+        desc = self._long_desc
+        return desc() if desc else None
+
     def __repr__(self):
         return f"<ConfigVar key={self._key!r}>"
 
     def __deepcopy__(self, memo):
-        cv = ConfigVar(self._key, default=self._default, type_=self._type)
-        return cv
+        # We can be considered ~stateless. State is stored in the config, which is external.
+        return self
 
 
 class ConfigVarWithConfig:
@@ -112,6 +143,12 @@ class ConfigVarWithConfig:
     def get_default_value(self) -> Any:
         return self._config_var.get_default_value()
 
+    def get_short_desc(self) -> Optional[str]:
+        return self._config_var.get_short_desc()
+
+    def get_long_desc(self) -> Optional[str]:
+        return self._config_var.get_long_desc()
+
     def is_modifiable(self) -> bool:
         return self._config.is_modifiable(self._config_var)
 
@@ -120,6 +157,11 @@ class ConfigVarWithConfig:
 
     def __repr__(self):
         return f"<ConfigVarWithConfig key={self.key()!r}>"
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, ConfigVarWithConfig):
+            return False
+        return self._config is other._config and self._config_var is other._config_var
 
 
 class SimpleConfig(Logger):
@@ -374,8 +416,10 @@ class SimpleConfig(Logger):
             with open(path, "w", encoding='utf-8') as f:
                 f.write(s)
             os_chmod(path, stat.S_IREAD | stat.S_IWRITE)
-        except FileNotFoundError:
-            # datadir probably deleted while running...
+        except OSError:
+            # datadir probably deleted while running... e.g. portable exe running on ejected USB drive
+            # (in which case it is typically either FileNotFoundError or PermissionError,
+            #  but let's just catch the more generic OSError and test explicitly)
             if os.path.exists(self.path):  # or maybe not?
                 raise
 
@@ -401,6 +445,7 @@ class SimpleConfig(Logger):
 
         new_path = self.get_fallback_wallet_path()
 
+        # TODO: this can be removed by now
         # default path in pre 1.9 versions
         old_path = os.path.join(self.path, "electrum.dat")
         if os.path.exists(old_path) and not os.path.exists(new_path):
@@ -408,12 +453,14 @@ class SimpleConfig(Logger):
 
         return new_path
 
-    def get_fallback_wallet_path(self):
+    def get_datadir_wallet_path(self):
         util.assert_datadir_available(self.path)
         dirpath = os.path.join(self.path, "wallets")
         make_dir(dirpath, allow_symlink=False)
-        path = os.path.join(self.path, "wallets", "default_wallet")
-        return path
+        return dirpath
+
+    def get_fallback_wallet_path(self):
+        return os.path.join(self.get_datadir_wallet_path(), "default_wallet")
 
     def remove_from_recently_open(self, filename):
         recent = self.RECENTLY_OPEN_WALLET_FILES or []
@@ -685,7 +732,7 @@ class SimpleConfig(Logger):
         fee_level: float between 0.0 and 1.0, representing fee slider position
         """
         if constants.net is constants.BitcoinRegtest:
-            return FEERATE_REGTEST_HARDCODED
+            return self.FEE_EST_STATIC_FEERATE
         if dyn is None:
             dyn = self.is_dynfee()
         if mempool is None:
@@ -701,10 +748,53 @@ class SimpleConfig(Logger):
             else:
                 fee_rate = self.eta_to_fee(self.get_fee_level())
         else:
-            fee_rate = self.FEE_EST_STATIC_FEERATE_FALLBACK
+            fee_rate = self.FEE_EST_STATIC_FEERATE
         if fee_rate is not None:
             fee_rate = int(fee_rate)
         return fee_rate
+
+    def getfeerate(self) -> Tuple[str, int, Optional[int], str]:
+        dyn = self.is_dynfee()
+        mempool = self.use_mempool_fees()
+        if dyn:
+            if mempool:
+                method = 'mempool'
+                fee_level = self.get_depth_level()
+                value = self.depth_target(fee_level)
+                fee_rate = self.depth_to_fee(fee_level)
+                tooltip = self.depth_tooltip(value)
+            else:
+                method = 'ETA'
+                fee_level = self.get_fee_level()
+                value = self.eta_target(fee_level)
+                fee_rate = self.eta_to_fee(fee_level)
+                tooltip = self.eta_tooltip(value)
+        else:
+            method = 'static'
+            value = self.FEE_EST_STATIC_FEERATE
+            fee_rate = value
+            tooltip = 'static feerate'
+
+        return method, value, fee_rate, tooltip
+
+    def setfeerate(self, fee_method: str, value: int):
+        if fee_method == 'mempool':
+            if value not in FEE_DEPTH_TARGETS:
+                raise Exception(f"Error: fee_level must be in {FEE_DEPTH_TARGETS}")
+            self.FEE_EST_USE_MEMPOOL = True
+            self.FEE_EST_DYNAMIC = True
+            self.FEE_EST_DYNAMIC_MEMPOOL_SLIDERPOS = FEE_DEPTH_TARGETS.index(value)
+        elif fee_method == 'ETA':
+            if value not in FEE_ETA_TARGETS:
+                raise Exception(f"Error: fee_level must be in {FEE_ETA_TARGETS}")
+            self.FEE_EST_USE_MEMPOOL = False
+            self.FEE_EST_DYNAMIC = True
+            self.FEE_EST_DYNAMIC_ETA_SLIDERPOS = FEE_ETA_TARGETS.index(value)
+        elif fee_method == 'static':
+            self.FEE_EST_DYNAMIC = False
+            self.FEE_EST_STATIC_FEERATE = value
+        else:
+            raise Exception(f"Invalid parameter: {fee_method}. Valid methods are: ETA, mempool, static.")
 
     def fee_per_byte(self):
         """Returns sat/vB fee to pay for a txn.
@@ -726,6 +816,7 @@ class SimpleConfig(Logger):
     @classmethod
     def estimate_fee_for_feerate(cls, fee_per_kb: Union[int, float, Decimal],
                                  size: Union[int, float, Decimal]) -> int:
+        # note: 'size' is in vbytes
         size = Decimal(size)
         fee_per_kb = Decimal(fee_per_kb)
         fee_per_byte = fee_per_kb / 1000
@@ -807,9 +898,17 @@ class SimpleConfig(Logger):
         """
         class CVLookupHelper:
             def __getattribute__(self, name: str) -> ConfigVarWithConfig:
+                if name in ("from_key", ):  # don't apply magic, just use standard lookup
+                    return super().__getattribute__(name)
                 config_var = config.__class__.__getattribute__(type(config), name)
                 if not isinstance(config_var, ConfigVar):
                     raise AttributeError()
+                return ConfigVarWithConfig(config=config, config_var=config_var)
+            def from_key(self, key: str) -> ConfigVarWithConfig:
+                try:
+                    config_var = _config_var_from_key[key]
+                except KeyError:
+                    raise KeyError(f"No ConfigVar with key={key!r}") from None
                 return ConfigVarWithConfig(config=config, config_var=config_var)
             def __setattr__(self, name, value):
                 raise Exception(
@@ -817,19 +916,21 @@ class SimpleConfig(Logger):
                     f"Either use config.cv.{name}.set() or assign to config.{name} instead.")
         return CVLookupHelper()
 
-    def get_swapserver_url(self):
+    def _default_swapserver_url(self) -> str:
         if constants.net == constants.BitcoinMainnet:
             default = 'https://swaps.electrum.org/api'
         elif constants.net == constants.BitcoinTestnet:
             default = 'https://swaps.electrum.org/testnet'
         else:
             default = 'http://localhost:5455'
-        return self.SWAPSERVER_URL or default
+        return default
 
     # config variables ----->
     NETWORK_AUTO_CONNECT = ConfigVar('auto_connect', default=True, type_=bool)
     NETWORK_ONESERVER = ConfigVar('oneserver', default=False, type_=bool)
-    NETWORK_PROXY = ConfigVar('proxy', default=None)
+    NETWORK_PROXY = ConfigVar('proxy', default=None, type_=str)
+    NETWORK_PROXY_USER = ConfigVar('proxy_user', default=None, type_=str)
+    NETWORK_PROXY_PASSWORD = ConfigVar('proxy_password', default=None, type_=str)
     NETWORK_SERVER = ConfigVar('server', default=None, type_=str)
     NETWORK_NOONION = ConfigVar('noonion', default=False, type_=bool)
     NETWORK_OFFLINE = ConfigVar('offline', default=False, type_=bool)
@@ -838,32 +939,105 @@ class SimpleConfig(Logger):
     NETWORK_MAX_INCOMING_MSG_SIZE = ConfigVar('network_max_incoming_msg_size', default=1_000_000, type_=int)  # in bytes
     NETWORK_TIMEOUT = ConfigVar('network_timeout', default=None, type_=int)
 
-    WALLET_BATCH_RBF = ConfigVar('batch_rbf', default=False, type_=bool)
-    WALLET_SPEND_CONFIRMED_ONLY = ConfigVar('confirmed_only', default=False, type_=bool)
+    WALLET_BATCH_RBF = ConfigVar(
+        'batch_rbf', default=False, type_=bool,
+        short_desc=lambda: _('Batch unconfirmed transactions'),
+        long_desc=lambda: (
+            _('If you check this box, your unconfirmed transactions will be consolidated into a single transaction.') + '\n' +
+            _('This will save fees, but might have unwanted effects in terms of privacy')),
+    )
+    WALLET_MERGE_DUPLICATE_OUTPUTS = ConfigVar(
+        'wallet_merge_duplicate_outputs', default=False, type_=bool,
+        short_desc=lambda: _('Merge duplicate outputs'),
+        long_desc=lambda: _('Merge transaction outputs that pay to the same address into '
+                            'a single output that pays the sum of the original amounts.'),
+    )
+    WALLET_SPEND_CONFIRMED_ONLY = ConfigVar(
+        'confirmed_only', default=False, type_=bool,
+        short_desc=lambda: _('Spend only confirmed coins'),
+        long_desc=lambda: _('Spend only confirmed inputs.'),
+    )
     WALLET_COIN_CHOOSER_POLICY = ConfigVar('coin_chooser', default='Privacy', type_=str)
-    WALLET_COIN_CHOOSER_OUTPUT_ROUNDING = ConfigVar('coin_chooser_output_rounding', default=True, type_=bool)
+    WALLET_COIN_CHOOSER_OUTPUT_ROUNDING = ConfigVar(
+        'coin_chooser_output_rounding', default=True, type_=bool,
+        short_desc=lambda: _('Enable output value rounding'),
+        long_desc=lambda: (
+            _('Set the value of the change output so that it has similar precision to the other outputs.') + '\n' +
+            _('This might improve your privacy somewhat.') + '\n' +
+            _('If enabled, at most 100 satoshis might be lost due to this, per transaction.')),
+    )
     WALLET_UNCONF_UTXO_FREEZE_THRESHOLD_SAT = ConfigVar('unconf_utxo_freeze_threshold', default=5_000, type_=int)
-    WALLET_BIP21_LIGHTNING = ConfigVar('bip21_lightning', default=False, type_=bool)
-    WALLET_BOLT11_FALLBACK = ConfigVar('bolt11_fallback', default=True, type_=bool)
+    WALLET_BIP21_LIGHTNING = ConfigVar(
+        'bip21_lightning', default=False, type_=bool,
+        short_desc=lambda: _('Add lightning requests to bitcoin URIs'),
+        long_desc=lambda: _('This may result in large QR codes'),
+    )
+    WALLET_BOLT11_FALLBACK = ConfigVar(
+        'bolt11_fallback', default=True, type_=bool,
+        short_desc=lambda: _('Add on-chain fallback to lightning requests'),
+    )
     WALLET_PAYREQ_EXPIRY_SECONDS = ConfigVar('request_expiry', default=invoices.PR_DEFAULT_EXPIRATION_WHEN_CREATING, type_=int)
     WALLET_USE_SINGLE_PASSWORD = ConfigVar('single_password', default=False, type_=bool)
     # note: 'use_change' and 'multiple_change' are per-wallet settings
+    WALLET_SEND_CHANGE_TO_LIGHTNING = ConfigVar(
+        'send_change_to_lightning', default=False, type_=bool,
+        short_desc=lambda: _('Send change to Lightning'),
+        long_desc=lambda: _('If possible, send the change of this transaction to your channels, with a submarine swap'),
+    )
 
     FX_USE_EXCHANGE_RATE = ConfigVar('use_exchange_rate', default=False, type_=bool)
     FX_CURRENCY = ConfigVar('currency', default='EUR', type_=str)
     FX_EXCHANGE = ConfigVar('use_exchange', default='CoinCodex', type_=str)  # default exchange should ideally provide historical rates
-    FX_HISTORY_RATES = ConfigVar('history_rates', default=False, type_=bool)
-    FX_HISTORY_RATES_CAPITAL_GAINS = ConfigVar('history_rates_capital_gains', default=False, type_=bool)
-    FX_SHOW_FIAT_BALANCE_FOR_ADDRESSES = ConfigVar('fiat_address', default=False, type_=bool)
+    FX_HISTORY_RATES = ConfigVar(
+        'history_rates', default=False, type_=bool,
+        short_desc=lambda: _('Download historical rates'),
+    )
+    FX_HISTORY_RATES_CAPITAL_GAINS = ConfigVar(
+        'history_rates_capital_gains', default=False, type_=bool,
+        short_desc=lambda: _('Show Capital Gains'),
+    )
+    FX_SHOW_FIAT_BALANCE_FOR_ADDRESSES = ConfigVar(
+        'fiat_address', default=False, type_=bool,
+        short_desc=lambda: _('Show Fiat balances'),
+    )
 
     LIGHTNING_LISTEN = ConfigVar('lightning_listen', default=None, type_=str)
     LIGHTNING_PEERS = ConfigVar('lightning_peers', default=None)
-    LIGHTNING_USE_GOSSIP = ConfigVar('use_gossip', default=False, type_=bool)
-    LIGHTNING_USE_RECOVERABLE_CHANNELS = ConfigVar('use_recoverable_channels', default=True, type_=bool)
-    LIGHTNING_ALLOW_INSTANT_SWAPS = ConfigVar('allow_instant_swaps', default=False, type_=bool)
+    LIGHTNING_USE_GOSSIP = ConfigVar(
+        'use_gossip', default=False, type_=bool,
+        short_desc=lambda: _("Use trampoline routing"),
+        long_desc=lambda: _("""Lightning payments require finding a path through the Lightning Network. You may use trampoline routing, or local routing (gossip).
+
+Downloading the network gossip uses quite some bandwidth and storage, and is not recommended on mobile devices. If you use trampoline, you can only open channels with trampoline nodes."""),
+    )
+    LIGHTNING_USE_RECOVERABLE_CHANNELS = ConfigVar(
+        'use_recoverable_channels', default=True, type_=bool,
+        short_desc=lambda: _("Create recoverable channels"),
+        long_desc=lambda: _("""Add extra data to your channel funding transactions, so that a static backup can be recovered from your seed.
+
+Note that static backups only allow you to request a force-close with the remote node. This assumes that the remote node is still online, did not lose its data, and accepts to force close the channel.
+
+If this is enabled, other nodes cannot open a channel to you. Channel recovery data is encrypted, so that only your wallet can decrypt it. However, blockchain analysis will be able to tell that the transaction was probably created by Electrum."""),
+    )
+    LIGHTNING_ALLOW_INSTANT_SWAPS = ConfigVar(
+        'allow_instant_swaps', default=False, type_=bool,
+        short_desc=lambda: _("Allow instant swaps"),
+        long_desc=lambda: _("""If this option is checked, your client will complete reverse swaps before the funding transaction is confirmed.
+
+Note you are at risk of losing the funds in the swap, if the funding transaction never confirms."""),
+    )
     LIGHTNING_TO_SELF_DELAY_CSV = ConfigVar('lightning_to_self_delay', default=7 * 144, type_=int)
     LIGHTNING_MAX_FUNDING_SAT = ConfigVar('lightning_max_funding_sat', default=LN_MAX_FUNDING_SAT_LEGACY, type_=int)
+    LIGHTNING_LEGACY_ADD_TRAMPOLINE = ConfigVar(
+        'lightning_legacy_add_trampoline', default=False, type_=bool,
+        short_desc=lambda: _("Add extra trampoline to legacy payments"),
+        long_desc=lambda: _("""When paying a non-trampoline invoice, add an extra trampoline to the route, in order to improve your privacy.
 
+This will result in longer routes; it might increase your fees and decrease the success rate of your payments."""),
+    )
+    INITIAL_TRAMPOLINE_FEE_LEVEL = ConfigVar('initial_trampoline_fee_level', default=1, type_=int)
+
+    LIGHTNING_NODE_ALIAS = ConfigVar('lightning_node_alias', default='', type_=str)
     EXPERIMENTAL_LN_FORWARD_PAYMENTS = ConfigVar('lightning_forward_payments', default=False, type_=bool)
     EXPERIMENTAL_LN_FORWARD_TRAMPOLINE_PAYMENTS = ConfigVar('lightning_forward_trampoline_payments', default=False, type_=bool)
     TEST_FAIL_HTLCS_WITH_TEMP_NODE_FAILURE = ConfigVar('test_fail_htlcs_with_temp_node_failure', default=False, type_=bool)
@@ -876,7 +1050,7 @@ class SimpleConfig(Logger):
 
     FEE_EST_DYNAMIC = ConfigVar('dynamic_fees', default=True, type_=bool)
     FEE_EST_USE_MEMPOOL = ConfigVar('mempool_fees', default=False, type_=bool)
-    FEE_EST_STATIC_FEERATE_FALLBACK = ConfigVar('fee_per_kb', default=FEERATE_FALLBACK_STATIC_FEE, type_=int)
+    FEE_EST_STATIC_FEERATE = ConfigVar('fee_per_kb', default=FEERATE_FALLBACK_STATIC_FEE, type_=int)
     FEE_EST_DYNAMIC_ETA_SLIDERPOS = ConfigVar('fee_level', default=2, type_=int)
     FEE_EST_DYNAMIC_MEMPOOL_SLIDERPOS = ConfigVar('depth_level', default=2, type_=int)
 
@@ -890,42 +1064,103 @@ class SimpleConfig(Logger):
     GUI_NAME = ConfigVar('gui', default='qt', type_=str)
     GUI_LAST_WALLET = ConfigVar('gui_last_wallet', default=None, type_=str)
 
-    GUI_QT_COLOR_THEME = ConfigVar('qt_gui_color_theme', default='default', type_=str)
+    GUI_QT_COLOR_THEME = ConfigVar(
+        'qt_gui_color_theme', default='default', type_=str,
+        short_desc=lambda: _('Color theme'),
+    )
     GUI_QT_DARK_TRAY_ICON = ConfigVar('dark_icon', default=False, type_=bool)
     GUI_QT_WINDOW_IS_MAXIMIZED = ConfigVar('is_maximized', default=False, type_=bool)
     GUI_QT_HIDE_ON_STARTUP = ConfigVar('hide_gui', default=False, type_=bool)
     GUI_QT_HISTORY_TAB_SHOW_TOOLBAR = ConfigVar('show_toolbar_history', default=False, type_=bool)
     GUI_QT_ADDRESSES_TAB_SHOW_TOOLBAR = ConfigVar('show_toolbar_addresses', default=False, type_=bool)
-    GUI_QT_TX_DIALOG_FETCH_TXIN_DATA = ConfigVar('tx_dialog_fetch_txin_data', default=False, type_=bool)
+    GUI_QT_TX_DIALOG_FETCH_TXIN_DATA = ConfigVar(
+        'tx_dialog_fetch_txin_data', default=False, type_=bool,
+        short_desc=lambda: _('Download missing data'),
+        long_desc=lambda: _(
+            'Download parent transactions from the network.\n'
+            'Allows filling in missing fee and input details.'),
+    )
     GUI_QT_RECEIVE_TABS_INDEX = ConfigVar('receive_tabs_index', default=0, type_=int)
     GUI_QT_RECEIVE_TAB_QR_VISIBLE = ConfigVar('receive_qr_visible', default=False, type_=bool)
-    GUI_QT_TX_EDITOR_SHOW_IO = ConfigVar('show_tx_io', default=False, type_=bool)
-    GUI_QT_TX_EDITOR_SHOW_FEE_DETAILS = ConfigVar('show_tx_fee_details', default=False, type_=bool)
-    GUI_QT_TX_EDITOR_SHOW_LOCKTIME = ConfigVar('show_tx_locktime', default=False, type_=bool)
+    GUI_QT_TX_EDITOR_SHOW_IO = ConfigVar(
+        'show_tx_io', default=False, type_=bool,
+        short_desc=lambda: _('Show inputs and outputs'),
+    )
+    GUI_QT_TX_EDITOR_SHOW_FEE_DETAILS = ConfigVar(
+        'show_tx_fee_details', default=False, type_=bool,
+        short_desc=lambda: _('Edit fees manually'),
+    )
+    GUI_QT_TX_EDITOR_SHOW_LOCKTIME = ConfigVar(
+        'show_tx_locktime', default=False, type_=bool,
+        short_desc=lambda: _('Edit Locktime'),
+    )
     GUI_QT_SHOW_TAB_ADDRESSES = ConfigVar('show_addresses_tab', default=False, type_=bool)
     GUI_QT_SHOW_TAB_CHANNELS = ConfigVar('show_channels_tab', default=False, type_=bool)
     GUI_QT_SHOW_TAB_UTXO = ConfigVar('show_utxo_tab', default=False, type_=bool)
     GUI_QT_SHOW_TAB_CONTACTS = ConfigVar('show_contacts_tab', default=False, type_=bool)
     GUI_QT_SHOW_TAB_CONSOLE = ConfigVar('show_console_tab', default=False, type_=bool)
+    GUI_QT_SHOW_TAB_NOTES = ConfigVar('show_notes_tab', default=False, type_=bool)
 
     GUI_QML_PREFERRED_REQUEST_TYPE = ConfigVar('preferred_request_type', default='bolt11', type_=str)
     GUI_QML_USER_KNOWS_PRESS_AND_HOLD = ConfigVar('user_knows_press_and_hold', default=False, type_=bool)
+    GUI_QML_ADDRESS_LIST_SHOW_TYPE = ConfigVar('address_list_show_type', default=1, type_=int)
+    GUI_QML_ADDRESS_LIST_SHOW_USED = ConfigVar('address_list_show_used', default=False, type_=bool)
+    GUI_QML_ALWAYS_ALLOW_SCREENSHOTS = ConfigVar('android_always_allow_screenshots', default=False, type_=bool)
 
     BTC_AMOUNTS_DECIMAL_POINT = ConfigVar('decimal_point', default=DECIMAL_POINT_DEFAULT, type_=int)
-    BTC_AMOUNTS_FORCE_NZEROS_AFTER_DECIMAL_POINT = ConfigVar('num_zeros', default=0, type_=int)
-    BTC_AMOUNTS_PREC_POST_SAT = ConfigVar('amt_precision_post_satoshi', default=0, type_=int)
-    BTC_AMOUNTS_ADD_THOUSANDS_SEP = ConfigVar('amt_add_thousands_sep', default=False, type_=bool)
+    BTC_AMOUNTS_FORCE_NZEROS_AFTER_DECIMAL_POINT = ConfigVar(
+        'num_zeros', default=0, type_=int,
+        short_desc=lambda: _('Zeros after decimal point'),
+        long_desc=lambda: _('Number of zeros displayed after the decimal point. For example, if this is set to 2, "1." will be displayed as "1.00"'),
+    )
+    BTC_AMOUNTS_PREC_POST_SAT = ConfigVar(
+        'amt_precision_post_satoshi', default=0, type_=int,
+        short_desc=lambda: _("Show Lightning amounts with msat precision"),
+    )
+    BTC_AMOUNTS_ADD_THOUSANDS_SEP = ConfigVar(
+        'amt_add_thousands_sep', default=False, type_=bool,
+        short_desc=lambda: _("Add thousand separators to bitcoin amounts"),
+    )
 
-    BLOCK_EXPLORER = ConfigVar('block_explorer', default='GlobalBoost Explorer', type_=str)
+    BLOCK_EXPLORER = ConfigVar(
+        'block_explorer', default='GlobalBoost Explorer', type_=str,
+        short_desc=lambda: _('Online Block Explorer'),
+        long_desc=lambda: _('Choose which online block explorer to use for functions that open a web browser'),
+    )
     BLOCK_EXPLORER_CUSTOM = ConfigVar('block_explorer_custom', default=None)
-    VIDEO_DEVICE_PATH = ConfigVar('video_device', default='default', type_=str)
-    OPENALIAS_ID = ConfigVar('alias', default="", type_=str)
+    VIDEO_DEVICE_PATH = ConfigVar(
+        'video_device', default='default', type_=str,
+        short_desc=lambda: _('Video Device'),
+        long_desc=lambda: (_("For scanning QR codes.") + "\n" +
+                           _("Install the zbar package to enable this.")),
+    )
+    OPENALIAS_ID = ConfigVar(
+        'alias', default="", type_=str,
+        short_desc=lambda: 'OpenAlias',
+        long_desc=lambda: (
+            _('OpenAlias record, used to receive coins and to sign payment requests.') + '\n\n' +
+            _('The following alias providers are available:') + '\n' +
+            '\n'.join(['https://cryptoname.co/', 'http://xmr.link']) + '\n\n' +
+            'For more information, see https://openalias.org'),
+    )
     HWD_SESSION_TIMEOUT = ConfigVar('session_timeout', default=300, type_=int)
     CLI_TIMEOUT = ConfigVar('timeout', default=60, type_=float)
-    AUTOMATIC_CENTRALIZED_UPDATE_CHECKS = ConfigVar('check_updates', default=False, type_=bool)
-    WRITE_LOGS_TO_DISK = ConfigVar('log_to_file', default=False, type_=bool)
+    AUTOMATIC_CENTRALIZED_UPDATE_CHECKS = ConfigVar(
+        'check_updates', default=False, type_=bool,
+        short_desc=lambda: _("Automatically check for software updates"),
+    )
+    WRITE_LOGS_TO_DISK = ConfigVar(
+        'log_to_file', default=False, type_=bool,
+        short_desc=lambda: _("Write logs to file"),
+        long_desc=lambda: _('Debug logs can be persisted to disk. These are useful for troubleshooting.'),
+    )
+    LOGS_NUM_FILES_KEEP = ConfigVar('logs_num_files_keep', default=10, type_=int)
     GUI_ENABLE_DEBUG_LOGS = ConfigVar('gui_enable_debug_logs', default=False, type_=bool)
-    LOCALIZATION_LANGUAGE = ConfigVar('language', default="", type_=str)
+    LOCALIZATION_LANGUAGE = ConfigVar(
+        'language', default="", type_=str,
+        short_desc=lambda: _("Language"),
+        long_desc=lambda: _("Select which language is used in the GUI (after restart)."),
+    )
     BLOCKCHAIN_PREFERRED_BLOCK = ConfigVar('blockchain_preferred_block', default=None)
     SHOW_CRASH_REPORTER = ConfigVar('show_crash_reporter', default=True, type_=bool)
     DONT_SHOW_TESTNET_WARNING = ConfigVar('dont_show_testnet_warning', default=False, type_=bool)
@@ -938,12 +1173,25 @@ class SimpleConfig(Logger):
     CONFIG_FORGET_CHANGES = ConfigVar('forget_config', default=False, type_=bool)
 
     # submarine swap server
-    SWAPSERVER_URL = ConfigVar('swapserver_url', default='', type_=str)
+    SWAPSERVER_URL = ConfigVar('swapserver_url', default=_default_swapserver_url, type_=str)
     SWAPSERVER_PORT = ConfigVar('swapserver_port', default=5455, type_=int)
     TEST_SWAPSERVER_REFUND = ConfigVar('test_swapserver_refund', default=False, type_=bool)
 
+    # zeroconf channels
+    ACCEPT_ZEROCONF_CHANNELS = ConfigVar('accept_zeroconf_channels', default=False, type_=bool)
+    ZEROCONF_TRUSTED_NODE = ConfigVar('zeroconf_trusted_node', default='', type_=str)
+    ZEROCONF_MIN_OPENING_FEE = ConfigVar('zeroconf_min_opening_fee', default=5000, type_=int)
+
     # connect to remote WT
-    WATCHTOWER_CLIENT_ENABLED = ConfigVar('use_watchtower', default=False, type_=bool)
+    WATCHTOWER_CLIENT_ENABLED = ConfigVar(
+        'use_watchtower', default=False, type_=bool,
+        short_desc=lambda: _("Use a remote watchtower"),
+        long_desc=lambda: ' '.join([
+            _("A watchtower is a daemon that watches your channels and prevents the other party from stealing funds by broadcasting an old state."),
+            _("If you have private a watchtower, enter its URL here."),
+            _("Check our online documentation if you want to configure Electrum as a watchtower."),
+        ]),
+    )
     WATCHTOWER_CLIENT_URL = ConfigVar('watchtower_url', default=None, type_=str)
 
     # run WT locally

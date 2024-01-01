@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import "controls"
 
@@ -205,7 +205,7 @@ Pane {
                     color: Material.accentColor
                 }
                 Label {
-                    text: 'mode' in Network.proxy ? qsTr('enabled') : qsTr('none')
+                    text: 'mode' in Network.proxy ? qsTr('enabled') : qsTr('disabled')
                 }
 
                 Label {

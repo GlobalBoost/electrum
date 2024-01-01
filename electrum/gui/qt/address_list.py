@@ -40,6 +40,7 @@ from electrum.simple_config import SimpleConfig
 
 from .util import MONOSPACE_FONT, ColorScheme, webopen
 from .my_treeview import MyTreeView, MySortModel
+from ..messages import MSG_FREEZE_ADDRESS
 
 if TYPE_CHECKING:
     from .main_window import ElectrumWindow
@@ -123,11 +124,11 @@ class AddressList(MyTreeView):
         addr = self.get_role_data_for_current_item(col=0, role=self.ROLE_ADDRESS_STR)
         self.main_window.show_address(addr)
 
-    def create_toolbar(self, config):
+    def create_toolbar(self, config: 'SimpleConfig'):
         toolbar, menu = self.create_toolbar_with_menu('')
         self.num_addr_label = toolbar.itemAt(0).widget()
         self._toolbar_checkbox = menu.addToggle(_("Show Filter"), lambda: self.toggle_toolbar())
-        menu.addConfig(_('Show Fiat balances'), config.cv.FX_SHOW_FIAT_BALANCE_FOR_ADDRESSES, callback=self.main_window.app.update_fiat_signal.emit)
+        menu.addConfig(config.cv.FX_SHOW_FIAT_BALANCE_FOR_ADDRESSES, callback=self.main_window.app.update_fiat_signal.emit)
         hbox = self.create_toolbar_buttons()
         toolbar.insertLayout(1, hbox)
         return toolbar
@@ -284,6 +285,7 @@ class AddressList(MyTreeView):
         multi_select = len(selected) > 1
         addrs = [self.item_from_index(item).text() for item in selected]
         menu = QMenu()
+        menu.setToolTipsVisible(True)
         if not multi_select:
             idx = self.indexAt(position)
             if not idx.isValid():
@@ -311,14 +313,17 @@ class AddressList(MyTreeView):
                 menu.addAction(_("View on block explorer"), lambda: webopen(addr_URL))
 
             if not self.wallet.is_frozen_address(addr):
-                menu.addAction(_("Freeze"), lambda: self.main_window.set_frozen_state_of_addresses([addr], True))
+                act = menu.addAction(_("Freeze"), lambda: self.main_window.set_frozen_state_of_addresses([addr], True))
             else:
-                menu.addAction(_("Unfreeze"), lambda: self.main_window.set_frozen_state_of_addresses([addr], False))
+                act = menu.addAction(_("Unfreeze"), lambda: self.main_window.set_frozen_state_of_addresses([addr], False))
+            act.setToolTip(MSG_FREEZE_ADDRESS)
 
         else:
             # multiple items selected
-            menu.addAction(_("Freeze"), lambda: self.main_window.set_frozen_state_of_addresses(addrs, True))
-            menu.addAction(_("Unfreeze"), lambda: self.main_window.set_frozen_state_of_addresses(addrs, False))
+            act = menu.addAction(_("Freeze"), lambda: self.main_window.set_frozen_state_of_addresses(addrs, True))
+            act.setToolTip(MSG_FREEZE_ADDRESS)
+            act = menu.addAction(_("Unfreeze"), lambda: self.main_window.set_frozen_state_of_addresses(addrs, False))
+            act.setToolTip(MSG_FREEZE_ADDRESS)
 
         coins = self.wallet.get_spendable_coins(addrs)
         if coins:

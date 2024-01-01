@@ -1,6 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.3
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 Dialog {
     id: abstractdialog
@@ -10,6 +11,8 @@ Dialog {
     property bool resizeWithKeyboard: true
 
     property bool _result: false
+    // workaround: remember opened state, to inhibit closed -> closed event
+    property bool _wasOpened: false
 
     // called to finally close dialog after checks by onClosing handler in main.qml
     function doClose() {
@@ -32,7 +35,7 @@ Dialog {
         reject()
     }
 
-    parent: resizeWithKeyboard ? Overlay.overlay.children[0] : Overlay.overlay
+    parent: resizeWithKeyboard ? app.keyboardFreeZone : Overlay.overlay
     modal: true
     Overlay.modal: Rectangle {
         color: "#aa000000"
@@ -45,7 +48,11 @@ Dialog {
     onOpenedChanged: {
         if (opened) {
             app.activeDialogs.push(abstractdialog)
+            _wasOpened = true
+            _result = false
         } else {
+            if (!_wasOpened)
+                return
             if (app.activeDialogs.indexOf(abstractdialog) < 0) {
                 console.log('dialog should exist in activeDialogs!')
                 app.activeDialogs.pop()

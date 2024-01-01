@@ -2,24 +2,29 @@ import os
 import signal
 import sys
 import threading
-import traceback
 from typing import TYPE_CHECKING
 
 try:
-    import PyQt5
-except Exception:
-    sys.exit("Error: Could not import PyQt5 on Linux systems, you may try 'sudo apt-get install python3-pyqt5'")
+    import PyQt6
+except Exception as e:
+    from electrum import GuiImportError
+    raise GuiImportError(
+        "Error: Could not import PyQt6. On Linux systems, "
+        "you may try 'sudo apt-get install python3-pyqt6'") from e
 
 try:
-    import PyQt5.QtQml
-except Exception:
-    sys.exit("Error: Could not import PyQt5.QtQml on Linux systems, you may try 'sudo apt-get install python3-pyqt5.qtquick'")
+    import PyQt6.QtQml
+except Exception as e:
+    from electrum import GuiImportError
+    raise GuiImportError(
+        "Error: Could not import PyQt6.QtQml. On Linux systems, "
+        "you may try 'sudo apt-get install python3-pyqt6.qtquick'") from e
 
-from PyQt5.QtCore import (Qt, QCoreApplication, QObject, QLocale, QTranslator, QTimer, pyqtSignal,
-                          QT_VERSION_STR, PYQT_VERSION_STR)
-from PyQt5.QtGui import QGuiApplication
+from PyQt6.QtCore import (Qt, QCoreApplication, QLocale, QTranslator, QTimer, QT_VERSION_STR, PYQT_VERSION_STR)
+from PyQt6.QtGui import QGuiApplication
+sys._GUI_QT_VERSION = 6  # used by gui/common_qt
 
-from electrum.i18n import _, set_language, languages
+from electrum.i18n import _
 from electrum.plugin import run_hook
 from electrum.util import profiler
 from electrum.logging import Logger
@@ -29,7 +34,6 @@ if TYPE_CHECKING:
     from electrum.daemon import Daemon
     from electrum.simple_config import SimpleConfig
     from electrum.plugin import Plugins
-    from electrum.wallet import Abstract_Wallet
 
 from .qeapp import ElectrumQmlApplication, Exception_Hook
 
@@ -43,7 +47,6 @@ class ElectrumTranslator(QTranslator):
 
 
 class ElectrumGui(BaseElectrumGui, Logger):
-
     @profiler
     def __init__(self, config: 'SimpleConfig', daemon: 'Daemon', plugins: 'Plugins'):
         BaseElectrumGui.__init__(self, config=config, daemon=daemon, plugins=plugins)
@@ -66,13 +69,11 @@ class ElectrumGui(BaseElectrumGui, Logger):
         # GC-ed when windows are closed
         #network.add_jobs([DebugMem([Abstract_Wallet, SPV, Synchronizer,
         #                            ElectrumWindow], interval=5)])
-        QCoreApplication.setAttribute(Qt.AA_X11InitThreads)
+
         if hasattr(Qt, "AA_ShareOpenGLContexts"):
             QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
         if hasattr(QGuiApplication, 'setDesktopFileName'):
             QGuiApplication.setDesktopFileName('electrum.desktop')
-        if hasattr(Qt, "AA_EnableHighDpiScaling"):
-            QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 
         if "QT_QUICK_CONTROLS_STYLE" not in os.environ:
             os.environ["QT_QUICK_CONTROLS_STYLE"] = "Material"
@@ -86,7 +87,7 @@ class ElectrumGui(BaseElectrumGui, Logger):
         self.timer = QTimer(self.app)
         self.timer.setSingleShot(False)
         self.timer.setInterval(500)  # msec
-        self.timer.timeout.connect(lambda: None) # periodically enter python scope
+        self.timer.timeout.connect(lambda: None)  # periodically enter python scope
 
         # hook for crash reporter
         Exception_Hook.maybe_setup(config=config, slot=self.app.appController.crash)
@@ -103,10 +104,14 @@ class ElectrumGui(BaseElectrumGui, Logger):
             return
 
         self.timer.start()
-        signal.signal(signal.SIGINT, lambda *args: self.stop())
+        signal.signal(signal.SIGINT, lambda *args: self._handle_sigint())
 
         self.logger.info('Entering main loop')
-        self.app.exec_()
+        self.app.exec()
+
+    def _handle_sigint(self):
+        self.app.appController.wantClose = True
+        self.stop()
 
     def stop(self):
         self.logger.info('closing GUI')

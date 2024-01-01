@@ -11,7 +11,7 @@ from PyQt5.QtGui import QMovie, QColor
 
 from electrum.i18n import _
 from electrum.logging import Logger
-
+from electrum.bitcoin import DummyAddress
 from electrum.plugin import run_hook
 from electrum.util import NotEnoughFunds, NoDynamicFeeEstimates, parse_max_spend
 from electrum.invoices import PR_PAID, Invoice, PR_BROADCASTING, PR_BROADCAST
@@ -63,11 +63,15 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         from .paytoedit import PayToEdit
         self.amount_e = BTCAmountEdit(self.window.get_decimal_point)
         self.payto_e = PayToEdit(self)
-        msg = (_("Recipient of the funds.") + "\n\n"
-               + _("You may enter a Bitcoin address, a label from your list of contacts "
-                   "(a list of completions will be proposed), "
-                   "or an alias (email-like address that forwards to a Bitcoin address)") + ". "
-               + _("Lightning invoices are also supported.") + "\n\n"
+        msg = (_("Recipient of the funds.")
+               + "\n\n"
+               + _("This field can contain:") + "\n"
+               + _("- a Bitcoin address or BIP21 URI") + "\n"
+               + _("- a Lightning invoice") + "\n"
+               + _("- a label from your list of contacts") + "\n"
+               + _("- an openalias") + "\n"
+               + _("- an arbitrary on-chain script, e.g.:") + " script(OP_RETURN deadbeef)" + "\n"
+               + "\n"
                + _("You can also pay to many outputs in a single transaction, "
                    "specifying one output per line.") + "\n" + _("Format: address, amount") + "\n"
                + _("To set the amount to 'max', use the '!' special character.") + "\n"
@@ -205,9 +209,14 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
 
     def on_amount_changed(self, text):
         # FIXME: implement full valid amount check to enable/disable Pay button
-        pi_valid = self.payto_e.payment_identifier.is_valid() if self.payto_e.payment_identifier else False
-        pi_error = self.payto_e.payment_identifier.is_error() if pi_valid else False
-        self.send_button.setEnabled(bool(self.amount_e.get_amount()) and pi_valid and not pi_error)
+        pi = self.payto_e.payment_identifier
+        if not pi:
+            self.send_button.setEnabled(False)
+            return
+        pi_error = pi.is_error() if pi.is_valid() else False
+        is_spk_script = pi.type == PaymentIdentifierType.SPK and not pi.spk_is_address
+        valid_amount = is_spk_script or bool(self.amount_e.get_amount())
+        self.send_button.setEnabled(pi.is_valid() and not pi_error and valid_amount)
 
     def do_paste(self):
         self.logger.debug('do_paste')
@@ -224,12 +233,20 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
             self.show_error(_('Invalid payment identifier'))
 
     def spend_max(self):
-        assert self.payto_e.payment_identifier is not None
-        assert self.payto_e.payment_identifier.type in [PaymentIdentifierType.SPK, PaymentIdentifierType.MULTILINE,
-                                                        PaymentIdentifierType.OPENALIAS]
+        pi = self.payto_e.payment_identifier
+
+        if pi is None or pi.type == PaymentIdentifierType.UNKNOWN:
+            return
+
+        assert pi.type in [PaymentIdentifierType.SPK, PaymentIdentifierType.MULTILINE,
+                           PaymentIdentifierType.BIP21, PaymentIdentifierType.OPENALIAS]
+
+        if pi.type == PaymentIdentifierType.BIP21:
+            assert 'amount' not in pi.bip21
+
         if run_hook('abort_send', self):
             return
-        outputs = self.payto_e.payment_identifier.get_onchain_outputs('!')
+        outputs = pi.get_onchain_outputs('!')
         if not outputs:
             return
         make_tx = lambda fee_est, *, confirmed_only=False: self.wallet.make_unsigned_transaction(
@@ -312,6 +329,15 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
             # user cancelled
             return
         is_preview = conf_dlg.is_preview
+
+        if tx.has_dummy_output(DummyAddress.SWAP):
+            sm = self.wallet.lnworker.swap_manager
+            coro = sm.request_swap_for_tx(tx)
+            swap, invoice, tx = self.network.run_from_another_thread(coro)
+            assert not tx.has_dummy_output(DummyAddress.SWAP)
+            tx.swap_invoice = invoice
+            tx.swap_payment_hash = swap.payment_hash
+
         if is_preview:
             self.window.show_transaction(tx, external_keypairs=external_keypairs, payment_identifier=payment_identifier)
             return
@@ -437,11 +463,18 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
             else:
                 self.amount_e.setToolTip('')
 
-        pi_unusable = pi.is_error() or (not self.wallet.has_lightning() and not pi.is_onchain())
+        # resolve '!' in amount editor if it was set before PI
+        if not lock_max and self.amount_e.text() == '!':
+            self.spend_max()
 
-        self.send_button.setEnabled(not pi_unusable and bool(self.amount_e.get_amount()) and not pi.has_expired())
-        self.save_button.setEnabled(not pi_unusable and pi.type not in [PaymentIdentifierType.LNURLP,
-                                                                        PaymentIdentifierType.LNADDR])
+        pi_unusable = pi.is_error() or (not self.wallet.has_lightning() and not pi.is_onchain())
+        is_spk_script = pi.type == PaymentIdentifierType.SPK and not pi.spk_is_address
+
+        amount_valid = is_spk_script or bool(self.amount_e.get_amount())
+
+        self.send_button.setEnabled(not pi_unusable and amount_valid and not pi.has_expired())
+        self.save_button.setEnabled(not pi_unusable and not is_spk_script and \
+                                    pi.type not in [PaymentIdentifierType.LNURLP, PaymentIdentifierType.LNADDR])
 
     def _handle_payment_identifier(self):
         self.update_fields()
@@ -454,7 +487,7 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
             self.prepare_for_send_tab_network_lookup()
             self.payto_e.payment_identifier.resolve(on_finished=self.resolve_done_signal.emit)
 
-    def on_resolve_done(self, pi):
+    def on_resolve_done(self, pi: 'PaymentIdentifier'):
         # TODO: resolve can happen while typing, we don't want message dialogs to pop up
         # currently we don't set error for emaillike recipients to avoid just that
         self.logger.debug('payment identifier resolve done')
@@ -463,6 +496,11 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
             self.show_error(pi.error)
             self.do_clear()
             return
+        # if openalias add openalias to contacts
+        if pi.type == PaymentIdentifierType.OPENALIAS:
+            key = pi.emaillike if pi.emaillike else pi.domainlike
+            pi.contacts[key] = ('openalias', pi.openalias_data.get('name'))
+
         self.update_fields()
 
     def get_message(self):
@@ -471,11 +509,8 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
     def read_invoice(self) -> Optional[Invoice]:
         if self.check_payto_line_and_show_errors():
             return
-        amount_sat = self.read_amount()
-        if not amount_sat:
-            self.show_error(_('No amount'))
-            return
 
+        amount_sat = self.read_amount()
         invoice = invoice_from_payment_identifier(
             self.payto_e.payment_identifier, self.wallet, amount_sat, self.get_message())
         if not invoice:
@@ -511,13 +546,13 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
         # must not be None
         return self.amount_e.get_amount() or 0
 
-    def on_finalize_done(self, pi):
+    def on_finalize_done(self, pi: PaymentIdentifier):
         self.showSpinner(False)
         self.update_fields()
         if pi.error:
             self.show_error(pi.error)
             return
-        invoice = pi.get_invoice(self.get_amount(), self.get_message())
+        invoice = pi.bolt11
         self.pending_invoice = invoice
         self.logger.debug(f'after finalize invoice: {invoice!r}')
         self.do_pay_invoice(invoice)
@@ -543,15 +578,19 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
     def do_edit_invoice(self, invoice: 'Invoice'):  # FIXME broken
         assert not bool(invoice.get_amount_sat())
         text = invoice.lightning_invoice if invoice.is_lightning() else invoice.get_address()
-        self.payto_e._on_input_btn(text)
+        self.set_payment_identifier(text)
         self.amount_e.setFocus()
         # disable save button, because it would create a new invoice
         self.save_button.setEnabled(False)
 
     def do_pay_invoice(self, invoice: 'Invoice'):
         if not bool(invoice.get_amount_sat()):
-            self.show_error(_('No amount'))
-            return
+            pi = self.payto_e.payment_identifier
+            if pi.type == PaymentIdentifierType.SPK and not pi.spk_is_address:
+                pass
+            else:
+                self.show_error(_('No amount'))
+                return
         if invoice.is_lightning():
             self.pay_lightning_invoice(invoice)
         else:
@@ -659,6 +698,8 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
                 num_sats_can_send = int(lnworker.num_sats_can_send())
                 msg += '\n' + _('Your channels can send {}.').format(self.format_amount(num_sats_can_send) + ' ' + self.base_unit())
             if not choices:
+                if not can_pay_onchain:
+                    msg += '\n' + _('Also, you have insufficient funds to pay on-chain.')
                 self.window.show_error(msg)
                 return
             r = self.window.query_choice(msg, choices)
@@ -690,6 +731,15 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
     def broadcast_transaction(self, tx: Transaction, *, payment_identifier: PaymentIdentifier = None):
         # note: payment_identifier is explicitly passed as self.payto_e.payment_identifier might
         #       already be cleared or otherwise have changed.
+        if hasattr(tx, 'swap_payment_hash'):
+            sm = self.wallet.lnworker.swap_manager
+            swap = sm.get_swap(tx.swap_payment_hash)
+            coro = sm.wait_for_htlcs_and_broadcast(swap=swap, invoice=tx.swap_invoice, tx=tx)
+            self.window.run_coroutine_dialog(
+                coro, _('Awaiting swap payment...'),
+                on_result=self.window.on_swap_result,
+                on_cancelled=lambda: sm.cancel_normal_swap(swap))
+            return
 
         def broadcast_thread():
             # non-GUI thread
@@ -738,7 +788,7 @@ class SendTab(QWidget, MessageBoxMixin, Logger):
             self.logger.debug(f'merchant notify error: {pi.get_error()}')
         else:
             self.logger.debug(f'merchant notify result: {pi.merchant_ack_status}: {pi.merchant_ack_message}')
-        # TODO: show user? if we broadcasted the tx succesfully, do we care?
+        # TODO: show user? if we broadcasted the tx successfully, do we care?
         # BitPay complains with a NAK if tx is RbF
 
     def toggle_paytomany(self):

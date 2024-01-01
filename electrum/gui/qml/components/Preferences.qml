@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.15
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -368,6 +368,24 @@ Pane {
                             wrapMode: Text.Wrap
                         }
                     }
+
+                    RowLayout {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Switch {
+                            id: alwaysAllowScreenshots
+                            onCheckedChanged: {
+                                if (activeFocus)
+                                    Config.alwaysAllowScreenshots = checked
+                            }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr('Always allow screenshots')
+                            wrapMode: Text.Wrap
+                        }
+                    }
                 }
 
             }
@@ -392,6 +410,7 @@ Pane {
         useTrampolineRouting.checked = !Config.useGossip
         useFallbackAddress.checked = Config.useFallbackAddress
         enableDebugLogs.checked = Config.enableDebugLogs
+        alwaysAllowScreenshots.checked = Config.alwaysAllowScreenshots
         useRecoverableChannels.checked = Config.useRecoverableChannels
         syncLabels.checked = AppController.isPluginEnabled('labels')
     }

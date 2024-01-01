@@ -53,9 +53,6 @@ HTLC_OUTPUT_WEIGHT = 172
 LN_MAX_FUNDING_SAT_LEGACY = pow(2, 24) - 1
 DUST_LIMIT_MAX = 1000
 
-# dummy address for fee estimation of funding tx
-def ln_dummy_address():
-    return redeem_script_to_address('p2wsh', '')
 
 from .json_db import StoredObject, stored_in, stored_as
 
@@ -67,6 +64,15 @@ def channel_id_from_funding_tx(funding_txid: str, funding_index: int) -> Tuple[b
 
 hex_to_bytes = lambda v: v if isinstance(v, bytes) else bytes.fromhex(v) if v is not None else None
 json_to_keypair = lambda v: v if isinstance(v, OnlyPubkeyKeypair) else Keypair(**v) if len(v)==2 else OnlyPubkeyKeypair(**v)
+
+
+def serialize_htlc_key(scid: bytes, htlc_id: int) -> str:
+    return scid.hex() + ':%d'%htlc_id
+
+
+def deserialize_htlc_key(htlc_key: str) -> Tuple[bytes, int]:
+    scid, htlc_id = htlc_key.split(':')
+    return bytes.fromhex(scid), int(htlc_id)
 
 
 @attr.s
@@ -93,6 +99,8 @@ class ChannelConfig(StoredObject):
     reserve_sat = attr.ib(type=int)  # applies to OTHER ctx
     htlc_minimum_msat = attr.ib(type=int)  # smallest value for INCOMING htlc
     upfront_shutdown_script = attr.ib(type=bytes, converter=hex_to_bytes)
+    announcement_node_sig = attr.ib(type=bytes, converter=hex_to_bytes)
+    announcement_bitcoin_sig = attr.ib(type=bytes, converter=hex_to_bytes)
 
     def validate_params(self, *, funding_sat: int, config: 'SimpleConfig', peer_features: 'LnFeatures') -> None:
         conf_name = type(self).__name__
@@ -196,7 +204,6 @@ class ChannelConfig(StoredObject):
 class LocalConfig(ChannelConfig):
     channel_seed = attr.ib(type=bytes, converter=hex_to_bytes)  # type: Optional[bytes]
     funding_locked_received = attr.ib(type=bool)
-    was_announced = attr.ib(type=bool)
     current_commitment_signature = attr.ib(type=bytes, converter=hex_to_bytes)
     current_htlc_signatures = attr.ib(type=bytes, converter=hex_to_bytes)
     per_commitment_secret_seed = attr.ib(type=bytes, converter=hex_to_bytes)
@@ -245,6 +252,7 @@ class FeeUpdate(StoredObject):
 @stored_as('constraints')
 @attr.s
 class ChannelConstraints(StoredObject):
+    flags = attr.ib(type=int, converter=int)
     capacity = attr.ib(type=int)  # in sat
     is_initiator = attr.ib(type=bool)  # note: sometimes also called "funder"
     funding_txn_minimum_depth = attr.ib(type=int)
@@ -285,7 +293,7 @@ class ImportedChannelBackupStorage(ChannelBackupStorage):
     remote_delay = attr.ib(type=int, converter=int)
     remote_payment_pubkey = attr.ib(type=bytes, converter=hex_to_bytes)
     remote_revocation_pubkey = attr.ib(type=bytes, converter=hex_to_bytes)
-    local_payment_pubkey = attr.ib(type=bytes, converter=hex_to_bytes, default=None)  # type: Optional[bytes]
+    local_payment_pubkey = attr.ib(type=bytes, converter=hex_to_bytes)  # type: Optional[bytes]
 
     def to_bytes(self) -> bytes:
         vds = BCDataStream()
@@ -447,20 +455,20 @@ MIN_FUNDING_SAT = 200_000
 
 # the minimum cltv_expiry accepted for newly received HTLCs
 # note: when changing, consider Blockchain.is_tip_stale()
-MIN_FINAL_CLTV_EXPIRY_ACCEPTED = 144
+MIN_FINAL_CLTV_DELTA_ACCEPTED = 144
 # set it a tiny bit higher for invoices as blocks could get mined
 # during forward path of payment
-MIN_FINAL_CLTV_EXPIRY_FOR_INVOICE = MIN_FINAL_CLTV_EXPIRY_ACCEPTED + 3
+MIN_FINAL_CLTV_DELTA_FOR_INVOICE = MIN_FINAL_CLTV_DELTA_ACCEPTED + 3
 
 # the deadline for offered HTLCs:
 # the deadline after which the channel has to be failed and timed out on-chain
-NBLOCK_DEADLINE_AFTER_EXPIRY_FOR_OFFERED_HTLCS = 1
+NBLOCK_DEADLINE_DELTA_AFTER_EXPIRY_FOR_OFFERED_HTLCS = 1
 
 # the deadline for received HTLCs this node has fulfilled:
 # the deadline after which the channel has to be failed and the HTLC fulfilled on-chain before its cltv_expiry
-NBLOCK_DEADLINE_BEFORE_EXPIRY_FOR_RECEIVED_HTLCS = 72
+NBLOCK_DEADLINE_DELTA_BEFORE_EXPIRY_FOR_RECEIVED_HTLCS = 72
 
-NBLOCK_CLTV_EXPIRY_TOO_FAR_INTO_FUTURE = 28 * 144
+NBLOCK_CLTV_DELTA_TOO_FAR_INTO_FUTURE = 28 * 144
 
 MAXIMUM_REMOTE_TO_SELF_DELAY_ACCEPTED = 2016
 
@@ -622,14 +630,19 @@ def make_htlc_tx_inputs(htlc_output_txid: str, htlc_output_index: int,
     c_inputs = [txin]
     return c_inputs
 
-def make_htlc_tx(*, cltv_expiry: int, inputs: List[PartialTxInput], output: PartialTxOutput) -> PartialTransaction:
-    assert type(cltv_expiry) is int
+def make_htlc_tx(*, cltv_abs: int, inputs: List[PartialTxInput], output: PartialTxOutput) -> PartialTransaction:
+    assert type(cltv_abs) is int
     c_outputs = [output]
-    tx = PartialTransaction.from_io(inputs, c_outputs, locktime=cltv_expiry, version=2)
+    tx = PartialTransaction.from_io(inputs, c_outputs, locktime=cltv_abs, version=2)
     return tx
 
-def make_offered_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
-                      local_htlcpubkey: bytes, payment_hash: bytes) -> bytes:
+def make_offered_htlc(
+    *,
+    revocation_pubkey: bytes,
+    remote_htlcpubkey: bytes,
+    local_htlcpubkey: bytes,
+    payment_hash: bytes,
+) -> bytes:
     assert type(revocation_pubkey) is bytes
     assert type(remote_htlcpubkey) is bytes
     assert type(local_htlcpubkey) is bytes
@@ -664,11 +677,17 @@ def make_offered_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
     ]))
     return script
 
-def make_received_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
-                       local_htlcpubkey: bytes, payment_hash: bytes, cltv_expiry: int) -> bytes:
+def make_received_htlc(
+    *,
+    revocation_pubkey: bytes,
+    remote_htlcpubkey: bytes,
+    local_htlcpubkey: bytes,
+    payment_hash: bytes,
+    cltv_abs: int,
+) -> bytes:
     for i in [revocation_pubkey, remote_htlcpubkey, local_htlcpubkey, payment_hash]:
         assert type(i) is bytes
-    assert type(cltv_expiry) is int
+    assert type(cltv_abs) is int
 
     script = bfh(construct_script([
         opcodes.OP_DUP,
@@ -694,7 +713,7 @@ def make_received_htlc(revocation_pubkey: bytes, remote_htlcpubkey: bytes,
         opcodes.OP_CHECKMULTISIG,
         opcodes.OP_ELSE,
         opcodes.OP_DROP,
-        cltv_expiry,
+        cltv_abs,
         opcodes.OP_CHECKLOCKTIMEVERIFY,
         opcodes.OP_DROP,
         opcodes.OP_CHECKSIG,
@@ -765,14 +784,21 @@ WITNESS_TEMPLATE_RECEIVED_HTLC = [
 ]
 
 
-def make_htlc_output_witness_script(is_received_htlc: bool, remote_revocation_pubkey: bytes, remote_htlc_pubkey: bytes,
-                                    local_htlc_pubkey: bytes, payment_hash: bytes, cltv_expiry: Optional[int]) -> bytes:
+def make_htlc_output_witness_script(
+    *,
+    is_received_htlc: bool,
+    remote_revocation_pubkey: bytes,
+    remote_htlc_pubkey: bytes,
+    local_htlc_pubkey: bytes,
+    payment_hash: bytes,
+    cltv_abs: Optional[int],
+) -> bytes:
     if is_received_htlc:
         return make_received_htlc(revocation_pubkey=remote_revocation_pubkey,
                                   remote_htlcpubkey=remote_htlc_pubkey,
                                   local_htlcpubkey=local_htlc_pubkey,
                                   payment_hash=payment_hash,
-                                  cltv_expiry=cltv_expiry)
+                                  cltv_abs=cltv_abs)
     else:
         return make_offered_htlc(revocation_pubkey=remote_revocation_pubkey,
                                  remote_htlcpubkey=remote_htlc_pubkey,
@@ -790,7 +816,7 @@ def get_ordered_channel_configs(chan: 'AbstractChannel', for_us: bool) -> Tuple[
 def possible_output_idxs_of_htlc_in_ctx(*, chan: 'Channel', pcp: bytes, subject: 'HTLCOwner',
                                         htlc_direction: 'Direction', ctx: Transaction,
                                         htlc: 'UpdateAddHtlc') -> Set[int]:
-    amount_msat, cltv_expiry, payment_hash = htlc.amount_msat, htlc.cltv_expiry, htlc.payment_hash
+    amount_msat, cltv_abs, payment_hash = htlc.amount_msat, htlc.cltv_abs, htlc.payment_hash
     for_us = subject == LOCAL
     conf, other_conf = get_ordered_channel_configs(chan=chan, for_us=for_us)
 
@@ -802,7 +828,7 @@ def possible_output_idxs_of_htlc_in_ctx(*, chan: 'Channel', pcp: bytes, subject:
                                                       remote_htlc_pubkey=other_htlc_pubkey,
                                                       local_htlc_pubkey=htlc_pubkey,
                                                       payment_hash=payment_hash,
-                                                      cltv_expiry=cltv_expiry)
+                                                      cltv_abs=cltv_abs)
     htlc_address = redeem_script_to_address('p2wsh', preimage_script.hex())
     candidates = ctx.get_output_idxs_from_address(htlc_address)
     return {output_idx for output_idx in candidates
@@ -815,9 +841,9 @@ def map_htlcs_to_ctx_output_idxs(*, chan: 'Channel', ctx: Transaction, pcp: byte
     htlc_to_ctx_output_idx_map = {}  # type: Dict[Tuple[Direction, UpdateAddHtlc], int]
     unclaimed_ctx_output_idxs = set(range(len(ctx.outputs())))
     offered_htlcs = chan.included_htlcs(subject, SENT, ctn=ctn)
-    offered_htlcs.sort(key=lambda htlc: htlc.cltv_expiry)
+    offered_htlcs.sort(key=lambda htlc: htlc.cltv_abs)
     received_htlcs = chan.included_htlcs(subject, RECEIVED, ctn=ctn)
-    received_htlcs.sort(key=lambda htlc: htlc.cltv_expiry)
+    received_htlcs.sort(key=lambda htlc: htlc.cltv_abs)
     for direction, htlcs in zip([SENT, RECEIVED], [offered_htlcs, received_htlcs]):
         for htlc in htlcs:
             cands = sorted(possible_output_idxs_of_htlc_in_ctx(chan=chan,
@@ -842,7 +868,7 @@ def map_htlcs_to_ctx_output_idxs(*, chan: 'Channel', ctx: Transaction, pcp: byte
 def make_htlc_tx_with_open_channel(*, chan: 'Channel', pcp: bytes, subject: 'HTLCOwner', ctn: int,
                                    htlc_direction: 'Direction', commit: Transaction, ctx_output_idx: int,
                                    htlc: 'UpdateAddHtlc', name: str = None) -> Tuple[bytes, PartialTransaction]:
-    amount_msat, cltv_expiry, payment_hash = htlc.amount_msat, htlc.cltv_expiry, htlc.payment_hash
+    amount_msat, cltv_abs, payment_hash = htlc.amount_msat, htlc.cltv_abs, htlc.payment_hash
     for_us = subject == LOCAL
     conf, other_conf = get_ordered_channel_configs(chan=chan, for_us=for_us)
 
@@ -865,14 +891,14 @@ def make_htlc_tx_with_open_channel(*, chan: 'Channel', pcp: bytes, subject: 'HTL
                                                       remote_htlc_pubkey=other_htlc_pubkey,
                                                       local_htlc_pubkey=htlc_pubkey,
                                                       payment_hash=payment_hash,
-                                                      cltv_expiry=cltv_expiry)
+                                                      cltv_abs=cltv_abs)
     htlc_tx_inputs = make_htlc_tx_inputs(
         commit.txid(), ctx_output_idx,
         amount_msat=amount_msat,
         witness_script=preimage_script.hex())
     if is_htlc_success:
-        cltv_expiry = 0
-    htlc_tx = make_htlc_tx(cltv_expiry=cltv_expiry, inputs=htlc_tx_inputs, output=htlc_tx_output)
+        cltv_abs = 0
+    htlc_tx = make_htlc_tx(cltv_abs=cltv_abs, inputs=htlc_tx_inputs, output=htlc_tx_output)
     return witness_script_of_htlc_tx_output, htlc_tx
 
 def make_funding_input(local_funding_pubkey: bytes, remote_funding_pubkey: bytes,
@@ -1010,7 +1036,7 @@ def make_commitment(
     #           the outputs are ordered in increasing cltv_expiry order."
     # so we sort by cltv_expiry now; and the later BIP69-sort is assumed to be *stable*
     htlcs = list(htlcs)
-    htlcs.sort(key=lambda x: x.htlc.cltv_expiry)
+    htlcs.sort(key=lambda x: x.htlc.cltv_abs)
 
     htlc_outputs, c_outputs_filtered = make_commitment_outputs(
         fees_per_participant=fees_per_participant,
@@ -1188,6 +1214,13 @@ class LnFeatures(IntFlag):
 
     _ln_feature_contexts[OPTION_SCID_ALIAS_REQ] = (LNFC.INIT | LNFC.NODE_ANN)
     _ln_feature_contexts[OPTION_SCID_ALIAS_OPT] = (LNFC.INIT | LNFC.NODE_ANN)
+
+    OPTION_ZEROCONF_REQ = 1 << 50
+    OPTION_ZEROCONF_OPT = 1 << 51
+
+    _ln_feature_direct_dependencies[OPTION_ZEROCONF_OPT] = {OPTION_SCID_ALIAS_OPT}
+    _ln_feature_contexts[OPTION_ZEROCONF_REQ] = (LNFC.INIT | LNFC.NODE_ANN)
+    _ln_feature_contexts[OPTION_ZEROCONF_OPT] = (LNFC.INIT | LNFC.NODE_ANN)
 
     def validate_transitive_dependencies(self) -> bool:
         # for all even bit set, set corresponding odd bit:
@@ -1460,6 +1493,12 @@ class LNPeerAddr:
     def __str__(self):
         return '{}@{}'.format(self.pubkey.hex(), self.net_addr_str())
 
+    @classmethod
+    def from_str(cls, s):
+        node_id, rest = extract_nodeid(s)
+        host, port = split_host_port(rest)
+        return LNPeerAddr(host, int(port), node_id)
+
     def __repr__(self):
         return f'<LNPeerAddr host={self.host} port={self.port} pubkey={self.pubkey.hex()}>'
 
@@ -1596,21 +1635,21 @@ NUM_MAX_EDGES_IN_PAYMENT_PATH = NUM_MAX_HOPS_IN_PAYMENT_PATH
 class UpdateAddHtlc:
     amount_msat = attr.ib(type=int, kw_only=True)
     payment_hash = attr.ib(type=bytes, kw_only=True, converter=hex_to_bytes, repr=lambda val: val.hex())
-    cltv_expiry = attr.ib(type=int, kw_only=True)
+    cltv_abs = attr.ib(type=int, kw_only=True)
     timestamp = attr.ib(type=int, kw_only=True)
     htlc_id = attr.ib(type=int, kw_only=True, default=None)
 
     @stored_in('adds', tuple)
-    def from_tuple(amount_msat, payment_hash, cltv_expiry, htlc_id, timestamp) -> 'UpdateAddHtlc':
+    def from_tuple(amount_msat, payment_hash, cltv_abs, htlc_id, timestamp) -> 'UpdateAddHtlc':
         return UpdateAddHtlc(
             amount_msat=amount_msat,
             payment_hash=payment_hash,
-            cltv_expiry=cltv_expiry,
+            cltv_abs=cltv_abs,
             htlc_id=htlc_id,
             timestamp=timestamp)
 
     def to_json(self):
-        return (self.amount_msat, self.payment_hash, self.cltv_expiry, self.htlc_id, self.timestamp)
+        return (self.amount_msat, self.payment_hash, self.cltv_abs, self.htlc_id, self.timestamp)
 
 
 class OnionFailureCodeMetaFlag(IntFlag):
@@ -1620,3 +1659,19 @@ class OnionFailureCodeMetaFlag(IntFlag):
     UPDATE   = 0x1000
 
 
+class PaymentFeeBudget(NamedTuple):
+    fee_msat: int
+
+    # The cltv budget covers the cost of route to get to the destination, but excluding the
+    # cltv-delta the destination wants for itself. (e.g. "min_final_cltv_delta" is excluded)
+    cltv: int  # this is cltv-delta-like, no absolute heights here!
+
+    #num_htlc: int
+
+    @classmethod
+    def default(cls, *, invoice_amount_msat: int) -> 'PaymentFeeBudget':
+        from .lnrouter import get_default_fee_budget_msat
+        return PaymentFeeBudget(
+            fee_msat=get_default_fee_budget_msat(invoice_amount_msat=invoice_amount_msat),
+            cltv=NBLOCK_CLTV_DELTA_TOO_FAR_INTO_FUTURE,
+        )

@@ -15,7 +15,7 @@ from electrum.wallet import (Abstract_Wallet, Standard_Wallet, create_new_wallet
 from electrum.exchange_rate import ExchangeBase, FxThread
 from electrum.util import TxMinedInfo, InvalidPassword
 from electrum.bitcoin import COIN
-from electrum.wallet_db import WalletDB
+from electrum.wallet_db import WalletDB, JsonDB
 from electrum.simple_config import SimpleConfig
 from electrum import util
 
@@ -36,10 +36,9 @@ class WalletTestCase(ElectrumTestCase):
 
     def setUp(self):
         super(WalletTestCase, self).setUp()
-        self.user_dir = tempfile.mkdtemp()
-        self.config = SimpleConfig({'electrum_path': self.user_dir})
+        self.config = SimpleConfig({'electrum_path': self.electrum_path})
 
-        self.wallet_path = os.path.join(self.user_dir, "somewallet")
+        self.wallet_path = os.path.join(self.electrum_path, "somewallet")
 
         self._saved_stdout = sys.stdout
         self._stdout_buffer = StringIO()
@@ -47,7 +46,6 @@ class WalletTestCase(ElectrumTestCase):
 
     def tearDown(self):
         super(WalletTestCase, self).tearDown()
-        shutil.rmtree(self.user_dir)
         # Restore the "real" stdout
         sys.stdout = self._saved_stdout
 
@@ -62,14 +60,14 @@ class TestWalletStorage(WalletTestCase):
             contents = f.write(contents)
 
         storage = WalletStorage(self.wallet_path)
-        db = WalletDB(storage.read(), manual_upgrades=True)
+        db = JsonDB(storage.read(), storage=storage)
         self.assertEqual("b", db.get("a"))
         self.assertEqual("d", db.get("c"))
 
     def test_write_dictionary_to_file(self):
 
         storage = WalletStorage(self.wallet_path)
-        db = WalletDB('', manual_upgrades=True)
+        db = JsonDB('', storage=storage)
 
         some_dict = {
             u"a": u"b",
@@ -78,13 +76,47 @@ class TestWalletStorage(WalletTestCase):
 
         for key, value in some_dict.items():
             db.put(key, value)
-        db.write(storage)
+        db.write()
 
         with open(self.wallet_path, "r") as f:
             contents = f.read()
         d = json.loads(contents)
         for key, value in some_dict.items():
             self.assertEqual(d[key], value)
+
+    async def test_storage_imported_add_privkeys_persistence_test(self):
+        text = ' '.join([
+            'p2wpkh:L4jkdiXszG26SUYvwwJhzGwg37H2nLhrbip7u6crmgNeJysv5FHL',
+            'p2wpkh:L24GxnN7NNUAfCXA6hFzB1jt59fYAAiFZMcLaJ2ZSawGpM3uqhb1'
+        ])
+        d = restore_wallet_from_text(text, path=self.wallet_path, config=self.config)
+        wallet = d['wallet']  # type: Imported_Wallet
+        self.assertEqual(2, len(wallet.get_receiving_addresses()))
+
+        wallet.save_db()
+
+        # open the wallet anew again, and add a privkey. This should add the new data as a json_patch
+        wallet = None
+        storage = WalletStorage(self.wallet_path)
+        db = WalletDB(storage.read(), storage=storage, upgrade=True)
+        wallet = Wallet(db, config=self.config)
+
+        wallet.import_private_keys(['p2wpkh:KzuqaaLp9zYjVuj8vQtCwFdiZFreW3NJNBachgVS8S9XMgj5y78b'], password=None)
+        self.assertEqual(3, len(wallet.get_receiving_addresses()))
+        self.assertEqual(3, len(wallet.keystore.keypairs))
+        wallet.save_db()
+
+        # open the wallet anew again, and verify if the privkey was stored
+        wallet = None
+        storage = WalletStorage(self.wallet_path)
+        db = WalletDB(storage.read(), storage=storage, upgrade=True)
+        wallet = Wallet(db, config=self.config)
+        self.assertEqual(3, len(wallet.get_receiving_addresses()))
+        self.assertEqual(3, len(wallet.keystore.keypairs))
+        self.assertTrue('03bf450797034dc95693096e575e3b3db14e5f074679b349b727f90fc7804ce7ab' in wallet.keystore.keypairs)
+        self.assertTrue('030dac677b9484e23db6f9255eddf433f4f12c02f9b35e0100f2f103ffbccf540f' in wallet.keystore.keypairs)
+        self.assertTrue('02f11d5f222a728fd08226cb5a1e85a74d58fc257bd3764bf1234346f91defed72' in wallet.keystore.keypairs)
+
 
 class FakeExchange(ExchangeBase):
     def __init__(self, rate):
@@ -112,7 +144,7 @@ class FakeWallet:
     def __init__(self, fiat_value):
         super().__init__()
         self.fiat_value = fiat_value
-        self.db = WalletDB("{}", manual_upgrades=True)
+        self.db = WalletDB('', storage=None, upgrade=False)
         self.adb = FakeADB()
         self.db.transactions = self.db.verified_tx = {'abc':'Tx'}
 
@@ -258,9 +290,9 @@ class TestWalletPassword(WalletTestCase):
 
     async def test_update_password_of_imported_wallet(self):
         wallet_str = '{"addr_history":{"1364Js2VG66BwRdkaoxAaFtdPb1eQgn8Dr":[],"15CyDgLffJsJgQrhcyooFH4gnVDG82pUrA":[],"1Exet2BhHsFxKTwhnfdsBMkPYLGvobxuW6":[]},"addresses":{"change":[],"receiving":["1364Js2VG66BwRdkaoxAaFtdPb1eQgn8Dr","1Exet2BhHsFxKTwhnfdsBMkPYLGvobxuW6","15CyDgLffJsJgQrhcyooFH4gnVDG82pUrA"]},"keystore":{"keypairs":{"0344b1588589958b0bcab03435061539e9bcf54677c104904044e4f8901f4ebdf5":"L2sED74axVXC4H8szBJ4rQJrkfem7UMc6usLCPUoEWxDCFGUaGUM","0389508c13999d08ffae0f434a085f4185922d64765c0bff2f66e36ad7f745cc5f":"L3Gi6EQLvYw8gEEUckmqawkevfj9s8hxoQDFveQJGZHTfyWnbk1U","04575f52b82f159fa649d2a4c353eb7435f30206f0a6cb9674fbd659f45082c37d559ffd19bea9c0d3b7dcc07a7b79f4cffb76026d5d4dff35341efe99056e22d2":"5JyVyXU1LiRXATvRTQvR9Kp8Rx1X84j2x49iGkjSsXipydtByUq"},"type":"imported"},"pruned_txo":{},"seed_version":13,"stored_height":-1,"transactions":{},"tx_fees":{},"txi":{},"txo":{},"use_encryption":false,"verified_tx3":{},"wallet_type":"standard","winpos-qt":[100,100,840,405]}'
-        db = WalletDB(wallet_str, manual_upgrades=False)
         storage = WalletStorage(self.wallet_path)
-        wallet = Wallet(db, storage, config=self.config)
+        db = WalletDB(wallet_str, storage=storage, upgrade=True)
+        wallet = Wallet(db, config=self.config)
 
         wallet.check_password(None)
 
@@ -274,9 +306,9 @@ class TestWalletPassword(WalletTestCase):
 
     async def test_update_password_of_standard_wallet(self):
         wallet_str = '''{"addr_history":{"12ECgkzK6gHouKAZ7QiooYBuk1CgJLJxes":[],"12iR43FPb5M7sw4Mcrr5y1nHKepg9EtZP1":[],"13HT1pfWctsSXVFzF76uYuVdQvcAQ2MAgB":[],"13kG9WH9JqS7hyCcVL1ssLdNv4aXocQY9c":[],"14Tf3qiiHJXStSU4KmienAhHfHq7FHpBpz":[],"14gmBxYV97mzYwWdJSJ3MTLbTHVegaKrcA":[],"15FGuHvRssu1r8fCw98vrbpfc3M4xs5FAV":[],"17oJzweA2gn6SDjsKgA9vUD5ocT1sSnr2Z":[],"18hNcSjZzRcRP6J2bfFRxp9UfpMoC4hGTv":[],"18n9PFxBjmKCGhd4PCDEEqYsi2CsnEfn2B":[],"19a98ZfEezDNbCwidVigV5PAJwrR2kw4Jz":[],"19z3j2ELqbg2pR87byCCt3BCyKR7rc3q8G":[],"1A3XSmvLQvePmvm7yctsGkBMX9ZKKXLrVq":[],"1CmhFe2BN1h9jheFpJf4v39XNPj8F9U6d":[],"1DuphhHUayKzbkdvjVjf5dtjn2ACkz4zEs":[],"1E4ygSNJpWL2uPXZHBptmU2LqwZTqb1Ado":[],"1GTDSjkVc9vaaBBBGNVqTANHJBcoT5VW9z":[],"1GWqgpThAuSq3tDg6uCoLQxPXQNnU8jZ52":[],"1GhmpwqSF5cqNgdr9oJMZx8dKxPRo4pYPP":[],"1J5TTUQKhwehEACw6Jjte1E22FVrbeDmpv":[],"1JWySzjzJhsETUUcqVZHuvQLA7pfFfmesb":[],"1KQHxcy3QUHAWMHKUtJjqD9cMKXcY2RTwZ":[],"1KoxZfc2KsgovjGDxwqanbFEA76uxgYH4G":[],"1KqVEPXdpbYvEbwsZcEKkrA4A2jsgj9hYN":[],"1N16yDSYe76c5A3CoVoWAKxHeAUc8Jhf9J":[],"1Pm8JBhzUJDqeQQKrmnop1Frr4phe1jbTt":[]},"addresses":{"change":["1GhmpwqSF5cqNgdr9oJMZx8dKxPRo4pYPP","1GTDSjkVc9vaaBBBGNVqTANHJBcoT5VW9z","15FGuHvRssu1r8fCw98vrbpfc3M4xs5FAV","1A3XSmvLQvePmvm7yctsGkBMX9ZKKXLrVq","19z3j2ELqbg2pR87byCCt3BCyKR7rc3q8G","1JWySzjzJhsETUUcqVZHuvQLA7pfFfmesb"],"receiving":["14gmBxYV97mzYwWdJSJ3MTLbTHVegaKrcA","13HT1pfWctsSXVFzF76uYuVdQvcAQ2MAgB","19a98ZfEezDNbCwidVigV5PAJwrR2kw4Jz","1J5TTUQKhwehEACw6Jjte1E22FVrbeDmpv","1Pm8JBhzUJDqeQQKrmnop1Frr4phe1jbTt","13kG9WH9JqS7hyCcVL1ssLdNv4aXocQY9c","1KQHxcy3QUHAWMHKUtJjqD9cMKXcY2RTwZ","12ECgkzK6gHouKAZ7QiooYBuk1CgJLJxes","12iR43FPb5M7sw4Mcrr5y1nHKepg9EtZP1","14Tf3qiiHJXStSU4KmienAhHfHq7FHpBpz","1KqVEPXdpbYvEbwsZcEKkrA4A2jsgj9hYN","17oJzweA2gn6SDjsKgA9vUD5ocT1sSnr2Z","1E4ygSNJpWL2uPXZHBptmU2LqwZTqb1Ado","18hNcSjZzRcRP6J2bfFRxp9UfpMoC4hGTv","1KoxZfc2KsgovjGDxwqanbFEA76uxgYH4G","18n9PFxBjmKCGhd4PCDEEqYsi2CsnEfn2B","1CmhFe2BN1h9jheFpJf4v39XNPj8F9U6d","1DuphhHUayKzbkdvjVjf5dtjn2ACkz4zEs","1GWqgpThAuSq3tDg6uCoLQxPXQNnU8jZ52","1N16yDSYe76c5A3CoVoWAKxHeAUc8Jhf9J"]},"keystore":{"seed":"cereal wise two govern top pet frog nut rule sketch bundle logic","type":"bip32","xprv":"xprv9s21ZrQH143K29XjRjUs6MnDB9wXjXbJP2kG1fnRk8zjdDYWqVkQYUqaDtgZp5zPSrH5PZQJs8sU25HrUgT1WdgsPU8GbifKurtMYg37d4v","xpub":"xpub661MyMwAqRbcEdcCXm1sTViwjBn28zK9kFfrp4C3JUXiW1sfP34f6HA45B9yr7EH5XGzWuTfMTdqpt9XPrVQVUdgiYb5NW9m8ij1FSZgGBF"},"pruned_txo":{},"seed_type":"standard","seed_version":13,"stored_height":-1,"transactions":{},"tx_fees":{},"txi":{},"txo":{},"use_encryption":false,"verified_tx3":{},"wallet_type":"standard","winpos-qt":[619,310,840,405]}'''
-        db = WalletDB(wallet_str, manual_upgrades=False)
         storage = WalletStorage(self.wallet_path)
-        wallet = Wallet(db, storage, config=self.config)
+        db = WalletDB(wallet_str, storage=storage, upgrade=True)
+        wallet = Wallet(db, config=self.config)
 
         wallet.check_password(None)
 
@@ -289,16 +321,16 @@ class TestWalletPassword(WalletTestCase):
 
     async def test_update_password_with_app_restarts(self):
         wallet_str = '{"addr_history":{"1364Js2VG66BwRdkaoxAaFtdPb1eQgn8Dr":[],"15CyDgLffJsJgQrhcyooFH4gnVDG82pUrA":[],"1Exet2BhHsFxKTwhnfdsBMkPYLGvobxuW6":[]},"addresses":{"change":[],"receiving":["1364Js2VG66BwRdkaoxAaFtdPb1eQgn8Dr","1Exet2BhHsFxKTwhnfdsBMkPYLGvobxuW6","15CyDgLffJsJgQrhcyooFH4gnVDG82pUrA"]},"keystore":{"keypairs":{"0344b1588589958b0bcab03435061539e9bcf54677c104904044e4f8901f4ebdf5":"L2sED74axVXC4H8szBJ4rQJrkfem7UMc6usLCPUoEWxDCFGUaGUM","0389508c13999d08ffae0f434a085f4185922d64765c0bff2f66e36ad7f745cc5f":"L3Gi6EQLvYw8gEEUckmqawkevfj9s8hxoQDFveQJGZHTfyWnbk1U","04575f52b82f159fa649d2a4c353eb7435f30206f0a6cb9674fbd659f45082c37d559ffd19bea9c0d3b7dcc07a7b79f4cffb76026d5d4dff35341efe99056e22d2":"5JyVyXU1LiRXATvRTQvR9Kp8Rx1X84j2x49iGkjSsXipydtByUq"},"type":"imported"},"pruned_txo":{},"seed_version":13,"stored_height":-1,"transactions":{},"tx_fees":{},"txi":{},"txo":{},"use_encryption":false,"verified_tx3":{},"wallet_type":"standard","winpos-qt":[100,100,840,405]}'
-        db = WalletDB(wallet_str, manual_upgrades=False)
         storage = WalletStorage(self.wallet_path)
-        wallet = Wallet(db, storage, config=self.config)
+        db = WalletDB(wallet_str, storage=storage, upgrade=True)
+        wallet = Wallet(db, config=self.config)
         await wallet.stop()
 
         storage = WalletStorage(self.wallet_path)
         # if storage.is_encrypted():
         #     storage.decrypt(password)
-        db = WalletDB(storage.read(), manual_upgrades=False)
-        wallet = Wallet(db, storage, config=self.config)
+        db = WalletDB(storage.read(), storage=storage, upgrade=True)
+        wallet = Wallet(db, config=self.config)
 
         wallet.check_password(None)
 

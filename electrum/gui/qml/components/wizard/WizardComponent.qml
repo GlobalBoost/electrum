@@ -1,6 +1,6 @@
-import QtQuick 2.0
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 Pane {
     id: root
@@ -10,6 +10,7 @@ Pane {
     property var wizard_data : ({})
     property bool valid
     property bool last: false
+    property string wizard_title: ''
     property string title: ''
     property bool securePage: false
 
@@ -18,6 +19,9 @@ Pane {
 
     background: Rectangle {
         color: Material.dialogColor
+        TapHandler {
+            onTapped: root.forceActiveFocus()
+        }
     }
 
     onAccept: {

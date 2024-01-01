@@ -86,6 +86,9 @@ def hash_raw_header(header: str) -> str:
     return hash_encode(sha256d(bfh(header)))
 
 
+pow_hash_header = hash_header
+
+
 # key: blockhash hex at forkpoint
 # the chain at some key is the best chain that includes the given hash
 blockchains = {}  # type: Dict[str, Blockchain]

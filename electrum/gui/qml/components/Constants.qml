@@ -1,8 +1,8 @@
-import QtQuick 2.6
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 Item {
-    readonly property int paddingTiny: 4 //deprecated
     readonly property int paddingXXSmall: 4
     readonly property int paddingXSmall: 6
     readonly property int paddingSmall: 8
@@ -30,6 +30,7 @@ Item {
     property color mutedForeground: 'gray' //Qt.lighter(Material.background, 2)
     property color darkerBackground: Qt.darker(Material.background, 1.20)
     property color lighterBackground: Qt.lighter(Material.background, 1.10)
+    property color darkerDialogBackground: Qt.darker(Material.dialogColor, 1.20)
     property color notificationBackground: Qt.lighter(Material.background, 1.5)
 
     property color colorCredit: "#ff80ff80"
@@ -40,6 +41,9 @@ Item {
     property color colorError: '#ffff8080'
     property color colorProgress: '#ffffff80'
     property color colorDone: '#ff80ff80'
+    property color colorValidBackground: '#ff008000'
+    property color colorInvalidBackground: '#ff800000'
+    property color colorAcceptable: '#ff8080ff'
 
     property color colorLightningLocal: "#6060ff"
     property color colorLightningLocalReserve: "#0000a0"

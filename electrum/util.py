@@ -21,11 +21,12 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import binascii
+import concurrent.futures
 import os, sys, re, json
 from collections import defaultdict, OrderedDict
 from typing import (NamedTuple, Union, TYPE_CHECKING, Tuple, Optional, Callable, Any,
                     Sequence, Dict, Generic, TypeVar, List, Iterable, Set, Awaitable)
-from datetime import datetime
+from datetime import datetime, timezone
 import decimal
 from decimal import Decimal
 import traceback
@@ -203,6 +204,14 @@ class UserFacingException(Exception):
 class InvoiceError(UserFacingException): pass
 
 
+class NetworkOfflineException(UserFacingException):
+    """Can be raised if we are running in offline mode (--offline flag)
+    and the user requests an operation that requires the network.
+    """
+    def __str__(self):
+        return _("You are offline.")
+
+
 # Throw this exception to unwind the stack like when an error occurs.
 # However unlike other exceptions the user won't be informed.
 class UserCancelled(Exception):
@@ -369,7 +378,9 @@ class DaemonThread(threading.Thread, Logger):
         self.running_lock = threading.Lock()
         self.job_lock = threading.Lock()
         self.jobs = []
-        self.stopped_event = threading.Event()  # set when fully stopped
+        self.stopped_event = threading.Event()        # set when fully stopped
+        self.stopped_event_async = asyncio.Event()    # set when fully stopped
+        self.wake_up_event = threading.Event()  # for perf optimisation of polling in run()
 
     def add_jobs(self, jobs):
         with self.job_lock:
@@ -403,6 +414,8 @@ class DaemonThread(threading.Thread, Logger):
     def stop(self):
         with self.running_lock:
             self.running = False
+            self.wake_up_event.set()
+            self.wake_up_event.clear()
 
     def on_stop(self):
         if 'ANDROID_DATA' in os.environ:
@@ -411,6 +424,8 @@ class DaemonThread(threading.Thread, Logger):
             self.logger.info("jnius detach")
         self.logger.info("stopped")
         self.stopped_event.set()
+        loop = get_asyncio_loop()
+        loop.call_soon_threadsafe(self.stopped_event_async.set)
 
 
 def print_stderr(*args):
@@ -793,10 +808,13 @@ def quantize_feerate(fee) -> Union[None, Decimal, int]:
     return Decimal(fee).quantize(_feerate_quanta, rounding=decimal.ROUND_HALF_DOWN)
 
 
-def timestamp_to_datetime(timestamp: Union[int, float, None]) -> Optional[datetime]:
+def timestamp_to_datetime(timestamp: Union[int, float, None], *, utc: bool = False) -> Optional[datetime]:
     if timestamp is None:
         return None
-    return datetime.fromtimestamp(timestamp)
+    tz = None
+    if utc:
+        tz = timezone.utc
+    return datetime.fromtimestamp(timestamp, tz=tz)
 
 
 def format_time(timestamp: Union[int, float, None]) -> str:
@@ -890,8 +908,6 @@ mainnet_block_explorers = {
                         {'tx': 'Transaction/', 'addr': 'Address/'}),
     'Blockchain.info': ('https://blockchain.com/btc/',
                         {'tx': 'tx/', 'addr': 'address/'}),
-    'blockchainbdgpzk.onion': ('https://blockchainbdgpzk.onion/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
     'Blockstream.info': ('https://blockstream.info/',
                         {'tx': 'tx/', 'addr': 'address/'}),
     'Bitaps.com': ('https://btc.bitaps.com/',
@@ -901,8 +917,6 @@ mainnet_block_explorers = {
     'Chain.so': ('https://www.chain.so/',
                         {'tx': 'tx/BTC/', 'addr': 'address/BTC/'}),
     'Insight.is': ('https://insight.bitpay.com/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
-    'TradeBlock.com': ('https://tradeblock.com/blockchain/',
                         {'tx': 'tx/', 'addr': 'address/'}),
     'BlockCypher.com': ('https://live.blockcypher.com/btc/',
                         {'tx': 'tx/', 'addr': 'address/'}),
@@ -916,8 +930,6 @@ mainnet_block_explorers = {
                         {'tx': 'tx/', 'addr': 'address/'}),
     'OXT.me': ('https://oxt.me/',
                         {'tx': 'transaction/', 'addr': 'address/'}),
-    'smartbit.com.au': ('https://www.smartbit.com.au/',
-                        {'tx': 'tx/', 'addr': 'address/'}),
     'mynode.local': ('http://mynode.local:3002/',
                         {'tx': 'tx/', 'addr': 'address/'}),
     'system default': ('blockchain:/',
@@ -1270,7 +1282,7 @@ def make_aiohttp_session(proxy: Optional[dict], headers=None, timeout=None):
             port=int(proxy['port']),
             username=proxy.get('user', None),
             password=proxy.get('password', None),
-            rdns=True,
+            rdns=True,  # needed to prevent DNS leaks over proxy
             ssl=ssl_context,
         )
     else:
@@ -1500,9 +1512,7 @@ def detect_tor_socks_proxy() -> Optional[Tuple[str, int]]:
 
 def is_tor_socks_port(host: str, port: int) -> bool:
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1.0)
-            s.connect((host, port))
+        with socket.create_connection((host, port), timeout=10) as s:
             # mimic "tor-resolve 0.0.0.0".
             # see https://github.com/spesmilo/electrum/issues/7317#issuecomment-1369281075
             # > this is a socks5 handshake, followed by a socks RESOLVE request as defined in
@@ -1709,6 +1719,7 @@ def list_enabled_bits(x: int) -> Sequence[int]:
 
 
 def resolve_dns_srv(host: str):
+    # FIXME this method is not using the network proxy. (although the proxy might not support UDP?)
     srv_records = dns.resolver.resolve(host, 'SRV')
     # priority: prefer lower
     # weight: tie breaker; prefer higher
@@ -1724,17 +1735,20 @@ def resolve_dns_srv(host: str):
 
 def randrange(bound: int) -> int:
     """Return a random integer k such that 1 <= k < bound, uniformly
-    distributed across that range."""
+    distributed across that range.
+    This is guaranteed to be cryptographically strong.
+    """
     # secrets.randbelow(bound) returns a random int: 0 <= r < bound,
     # hence transformations:
     return secrets.randbelow(bound - 1) + 1
 
 
-class CallbackManager:
+class CallbackManager(Logger):
     # callbacks set by the GUI or any thread
     # guarantee: the callbacks will always get triggered from the asyncio thread.
 
     def __init__(self):
+        Logger.__init__(self)
         self.callback_lock = threading.Lock()
         self.callbacks = defaultdict(list)      # note: needs self.callback_lock
         self._running_cb_futs = set()
@@ -1760,18 +1774,25 @@ class CallbackManager:
         with self.callback_lock:
             callbacks = self.callbacks[event][:]
         for callback in callbacks:
-            # FIXME: if callback throws, we will lose the traceback
-            if asyncio.iscoroutinefunction(callback):
+            if asyncio.iscoroutinefunction(callback):  # async cb
                 fut = asyncio.run_coroutine_threadsafe(callback(*args), loop)
                 # keep strong references around to avoid GC issues:
                 self._running_cb_futs.add(fut)
-                fut.add_done_callback(lambda fut_: self._running_cb_futs.remove(fut_))
-            elif get_running_loop() == loop:
-                # run callback immediately, so that it is guaranteed
-                # to have been executed when this method returns
-                callback(*args)
-            else:
-                loop.call_soon_threadsafe(callback, *args)
+                def on_done(fut_: concurrent.futures.Future):
+                    assert fut_.done()
+                    self._running_cb_futs.remove(fut_)
+                    if exc := fut_.exception():
+                        self.logger.error(f"cb errored. {event=}. {exc=}", exc_info=exc)
+                fut.add_done_callback(on_done)
+            else:  # non-async cb
+                # note: the cb needs to run in the asyncio thread
+                if get_running_loop() == loop:
+                    # run callback immediately, so that it is guaranteed
+                    # to have been executed when this method returns
+                    callback(*args)
+                else:
+                    # note: if cb raises, asyncio will log the exception
+                    loop.call_soon_threadsafe(callback, *args)
 
 
 callback_mgr = CallbackManager()
@@ -1812,7 +1833,8 @@ def event_listener(func):
 
 
 _NetAddrType = TypeVar("_NetAddrType")
-
+# requirements for _NetAddrType:
+# - reasonable __hash__() implementation (e.g. based on host/port of remote endpoint)
 
 class NetworkRetryManager(Generic[_NetAddrType]):
     """Truncated Exponential Backoff for network connections."""
@@ -1876,6 +1898,8 @@ class NetworkRetryManager(Generic[_NetAddrType]):
 
 
 class MySocksProxy(aiorpcx.SOCKSProxy):
+    # note: proxy will not leak DNS as create_connection()
+    # sets (local DNS) resolve=False by default
 
     async def open_connection(self, host=None, port=None, **kwargs):
         loop = asyncio.get_running_loop()
@@ -1985,6 +2009,14 @@ class nullcontext:
 
     async def __aexit__(self, *excinfo):
         pass
+
+
+class classproperty(property):
+    """~read-only class-level @property
+    from https://stackoverflow.com/a/13624858 by denis-ryzhkov
+    """
+    def __get__(self, owner_self, owner_cls):
+        return self.fget(owner_cls)
 
 
 def get_running_loop() -> Optional[asyncio.AbstractEventLoop]:

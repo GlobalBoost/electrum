@@ -15,7 +15,7 @@ from electrum.bitcoin import COIN
 from electrum.wallet import Abstract_Wallet
 
 from .util import Buttons, CloseButton, ShowQRLineEdit, MessageBoxMixin, WWLabel
-from .util import QtEventListener, qt_event_listener
+from .util import QtEventListener, qt_event_listener, VLine
 
 if TYPE_CHECKING:
     from .main_window import ElectrumWindow
@@ -85,7 +85,7 @@ class ChannelDetailsDialog(QtWidgets.QDialog, MessageBoxMixin, QtEventListener):
     def make_htlc_item(self, i: UpdateAddHtlc, direction: Direction) -> HTLCItem:
         it = HTLCItem(_('Sent HTLC with ID {}' if Direction.SENT == direction else 'Received HTLC with ID {}').format(i.htlc_id))
         it.appendRow([HTLCItem(_('Amount')),HTLCItem(self.format_msat(i.amount_msat))])
-        it.appendRow([HTLCItem(_('CLTV expiry')),HTLCItem(str(i.cltv_expiry))])
+        it.appendRow([HTLCItem(_('CLTV expiry')), HTLCItem(str(i.cltv_abs))])
         it.appendRow([HTLCItem(_('Payment hash')),HTLCItem(i.payment_hash.hex())])
         return it
 
@@ -242,11 +242,7 @@ class ChannelDetailsDialog(QtWidgets.QDialog, MessageBoxMixin, QtEventListener):
         # channel stats left column
         hbox_stats.addLayout(form_layout_left, 50)
         # vertical line separator
-        line_separator = QtWidgets.QFrame()
-        line_separator.setFrameShape(QtWidgets.QFrame.VLine)
-        line_separator.setFrameShadow(QtWidgets.QFrame.Sunken)
-        line_separator.setLineWidth(1)
-        hbox_stats.addWidget(line_separator)
+        hbox_stats.addWidget(VLine())
         # channel stats right column
         hbox_stats.addLayout(form_layout_right, 50)
         return hbox_stats

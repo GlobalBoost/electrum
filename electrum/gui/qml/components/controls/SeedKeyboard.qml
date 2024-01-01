@@ -1,7 +1,7 @@
-import QtQuick 2.15
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.15
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 Item {
     id: root
@@ -13,7 +13,7 @@ Item {
 
     property int keywidth: (root.width - 2 * hpadding) / 10 - keyhspacing
     property int keyheight: (root.height - 2 * vpadding) / 4 - keyvspacing
-    property int keyhspacing: 4
+    property int keyhspacing: 2
     property int keyvspacing: 5
 
     function emitKeyEvent(key, keycode) {

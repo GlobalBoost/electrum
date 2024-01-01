@@ -1,6 +1,6 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.1
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
 
 import org.electrum 1.0
 
@@ -34,7 +34,11 @@ Wizard {
             walletwizard.walletCreated()
         }
         function onCreateError(error) {
-            var dialog = app.messageDialog.createObject(app, { text: error })
+            var dialog = app.messageDialog.createObject(app, {
+                title: qsTr('Error'),
+                iconSource: Qt.resolvedUrl('../../icons/warning.png'),
+                text: error
+            })
             dialog.open()
         }
     }

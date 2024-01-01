@@ -12,8 +12,7 @@ electrum/locale/
 packages
 env/
 .buildozer
-.buildozer_kivy/
-.buildozer_qml/
+.buildozer_*/
 bin/
 /app.fil
 .idea
@@ -21,6 +20,8 @@ bin/
 .vscode
 electrum_data
 .DS_Store
+contrib/trigger_website
+contrib/trigger_binaries
 
 # tests/tox
 .tox/

@@ -5,10 +5,10 @@ from . import ElectrumTestCase
 
 from electrum.simple_config import SimpleConfig
 from electrum.wallet import restore_wallet_from_text, Standard_Wallet, Abstract_Wallet
-from electrum.invoices import PR_UNPAID, PR_PAID, PR_UNCONFIRMED, BaseInvoice
+from electrum.invoices import PR_UNPAID, PR_PAID, PR_UNCONFIRMED, BaseInvoice, Invoice, LN_EXPIRY_NEVER
 from electrum.address_synchronizer import TX_HEIGHT_UNCONFIRMED
 from electrum.transaction import Transaction, PartialTxOutput
-from electrum.util import TxMinedInfo
+from electrum.util import TxMinedInfo, InvoiceError
 
 
 class TestWalletPaymentRequests(ElectrumTestCase):
@@ -34,7 +34,7 @@ class TestWalletPaymentRequests(ElectrumTestCase):
         funding_tx = Transaction('0200000000010132515e6aade1b79ec7dd3bac0896d8b32c56195d23d07d48e21659cef24301560100000000fdffffff0112841e000000000016001477fe6d2a27e8860c278d4d2cd90bad716bb9521a02473044022041ed68ef7ef122813ac6a5e996b8284f645c53fbe6823b8e430604a8915a867802203233f5f4d347a687eb19b2aa570829ab12aeeb29a24cc6d6d20b8b3d79e971ae012102bee0ee043817e50ac1bb31132770f7c41e35946ccdcb771750fb9696bdd1b307ad951d00')
         funding_txid = funding_tx.txid()
         assert 'db949963c3787c90a40fb689ffdc3146c27a9874a970d1fd20921afbe79a7aa9' == funding_txid
-        wallet2.adb.receive_tx_callback(funding_txid, funding_tx, TX_HEIGHT_UNCONFIRMED)
+        wallet2.adb.receive_tx_callback(funding_tx, TX_HEIGHT_UNCONFIRMED)
         return wallet2
 
     async def test_wallet_with_ln_creates_payreq_and_gets_paid_on_ln(self):
@@ -72,8 +72,8 @@ class TestWalletPaymentRequests(ElectrumTestCase):
         # get paid onchain
         wallet2 = self.create_wallet2()  # type: Standard_Wallet
         outputs = [PartialTxOutput.from_address_and_value(pr.get_address(), pr.get_amount_sat())]
-        tx = wallet2.mktx(outputs=outputs, fee=5000)
-        wallet1.adb.receive_tx_callback(tx.txid(), tx, TX_HEIGHT_UNCONFIRMED)
+        tx = wallet2.create_transaction(outputs=outputs, fee=5000)
+        wallet1.adb.receive_tx_callback(tx, TX_HEIGHT_UNCONFIRMED)
         self.assertEqual(PR_UNCONFIRMED, wallet1.get_invoice_status(pr))
         # tx gets mined
         wallet1.db.put('stored_height', 1010)
@@ -102,8 +102,8 @@ class TestWalletPaymentRequests(ElectrumTestCase):
         # get paid onchain
         wallet2 = self.create_wallet2()  # type: Standard_Wallet
         outputs = [PartialTxOutput.from_address_and_value(pr.get_address(), pr.get_amount_sat())]
-        tx = wallet2.mktx(outputs=outputs, fee=5000)
-        wallet1.adb.receive_tx_callback(tx.txid(), tx, TX_HEIGHT_UNCONFIRMED)
+        tx = wallet2.create_transaction(outputs=outputs, fee=5000)
+        wallet1.adb.receive_tx_callback(tx, TX_HEIGHT_UNCONFIRMED)
         self.assertEqual(PR_UNCONFIRMED, wallet1.get_invoice_status(pr))
         # tx gets mined
         wallet1.db.put('stored_height', 1010)
@@ -132,8 +132,8 @@ class TestWalletPaymentRequests(ElectrumTestCase):
         # get paid onchain
         wallet2 = self.create_wallet2()  # type: Standard_Wallet
         outputs = [PartialTxOutput.from_address_and_value(pr.get_address(), pr.get_amount_sat())]
-        tx = wallet2.mktx(outputs=outputs, fee=5000)
-        wallet1.adb.receive_tx_callback(tx.txid(), tx, TX_HEIGHT_UNCONFIRMED)
+        tx = wallet2.create_transaction(outputs=outputs, fee=5000)
+        wallet1.adb.receive_tx_callback(tx, TX_HEIGHT_UNCONFIRMED)
         self.assertEqual(PR_UNCONFIRMED, wallet1.get_invoice_status(pr))
         # tx mined in the past (before invoice creation)
         tx_info = TxMinedInfo(height=990,
@@ -183,8 +183,8 @@ class TestWalletPaymentRequests(ElectrumTestCase):
         # pr2 gets paid onchain
         wallet2 = self.create_wallet2()  # type: Standard_Wallet
         outputs = [PartialTxOutput.from_address_and_value(pr2.get_address(), pr2.get_amount_sat())]
-        tx = wallet2.mktx(outputs=outputs, fee=5000)
-        wallet1.adb.receive_tx_callback(tx.txid(), tx, TX_HEIGHT_UNCONFIRMED)
+        tx = wallet2.create_transaction(outputs=outputs, fee=5000)
+        wallet1.adb.receive_tx_callback(tx, TX_HEIGHT_UNCONFIRMED)
         self.assertEqual(PR_UNCONFIRMED, wallet1.get_invoice_status(pr2))
 
         # create payreq4, which should not reuse addr2
@@ -254,8 +254,8 @@ class TestWalletPaymentRequests(ElectrumTestCase):
         # pr2 gets paid onchain
         wallet2 = self.create_wallet2()  # type: Standard_Wallet
         outputs = [PartialTxOutput.from_address_and_value(pr2.get_address(), pr2.get_amount_sat())]
-        tx = wallet2.mktx(outputs=outputs, fee=5000)
-        wallet1.adb.receive_tx_callback(tx.txid(), tx, TX_HEIGHT_UNCONFIRMED)
+        tx = wallet2.create_transaction(outputs=outputs, fee=5000)
+        wallet1.adb.receive_tx_callback(tx, TX_HEIGHT_UNCONFIRMED)
         self.assertEqual(PR_UNCONFIRMED, wallet1.get_invoice_status(pr2))
         self.assertEqual(pr2, wallet1.get_request_by_addr(addr1))
 
@@ -266,3 +266,41 @@ class TestWalletPaymentRequests(ElectrumTestCase):
         BaseInvoice._get_cur_time = lambda *args: time.time() + 200_000
         self.assertEqual(PR_UNCONFIRMED, wallet1.get_invoice_status(pr2))
         self.assertEqual(pr2, wallet1.get_request_by_addr(addr1))
+
+
+class TestBaseInvoice(ElectrumTestCase):
+    TESTNET = True
+
+    async def test_arg_validation(self):
+        amount_sat = 10_000
+        outputs = [PartialTxOutput.from_address_and_value("tb1qmjzmg8nd4z56ar4fpngzsr6euktrhnjg9td385", amount_sat)]
+        invoice = Invoice(
+            amount_msat=amount_sat * 1000,
+            message="mymsg",
+            time=1692716965,
+            exp=LN_EXPIRY_NEVER,
+            outputs=outputs,
+            bip70=None,
+            height=0,
+            lightning_invoice=None,
+        )
+        with self.assertRaises(InvoiceError):
+            invoice.amount_msat = 10**20
+        with self.assertRaises(InvoiceError):
+            invoice.set_amount_msat(10**20)
+        with self.assertRaises(InvoiceError):
+            invoice2 = Invoice(
+                amount_msat=10**20,
+                message="mymsg",
+                time=1692716965,
+                exp=LN_EXPIRY_NEVER,
+                outputs=outputs,
+                bip70=None,
+                height=0,
+                lightning_invoice=None,
+            )
+        with self.assertRaises(TypeError):
+            invoice.time = "asd"
+        with self.assertRaises(TypeError):
+            invoice.exp = "asd"
+

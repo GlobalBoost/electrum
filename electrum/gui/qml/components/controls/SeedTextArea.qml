@@ -1,7 +1,7 @@
-import QtQuick 2.15
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.15
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -125,7 +125,7 @@ Pane {
         SeedKeyboard {
             id: kbd
             Layout.fillWidth: true
-            Layout.preferredHeight: kbd.width / 2
+            Layout.preferredHeight: kbd.width / 1.75
             visible: !root.readOnly
             onKeyEvent: {
                 if (keycode == Qt.Key_Backspace) {

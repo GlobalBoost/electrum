@@ -24,6 +24,7 @@
 # SOFTWARE.
 import asyncio
 import ast
+import errno
 import os
 import time
 import traceback
@@ -41,13 +42,13 @@ from aiorpcx import timeout_after, TaskTimeout, ignore_after
 
 from . import util
 from .network import Network
-from .util import (json_decode, to_bytes, to_string, profiler, standardize_path, constant_time_compare)
+from .util import (json_decode, to_bytes, to_string, profiler, standardize_path, constant_time_compare, InvalidPassword)
 from .invoices import PR_PAID, PR_EXPIRED
 from .util import log_exceptions, ignore_exceptions, randrange, OldTaskGroup
 from .util import EventListener, event_listener
 from .wallet import Wallet, Abstract_Wallet
 from .storage import WalletStorage
-from .wallet_db import WalletDB
+from .wallet_db import WalletDB, WalletRequiresSplit, WalletRequiresUpgrade, WalletUnfinished
 from .commands import known_commands, Commands
 from .simple_config import SimpleConfig
 from .exchange_rate import FxThread
@@ -411,6 +412,7 @@ class Daemon(Logger):
         if 'wallet_path' in config.cmdline_options:
             self.logger.warning("Ignoring parameter 'wallet_path' for daemon. "
                                 "Use the load_wallet command instead.")
+        self._plugins = None  # type: Optional[Plugins]
         self.asyncio_loop = util.get_asyncio_loop()
         if not self.config.NETWORK_OFFLINE:
             self.network = Network(config, daemon=self)
@@ -480,15 +482,13 @@ class Daemon(Logger):
         return func_wrapper
 
     @with_wallet_lock
-    def load_wallet(self, path, password, *, manual_upgrades=True) -> Optional[Abstract_Wallet]:
+    def load_wallet(self, path, password, *, upgrade=False) -> Optional[Abstract_Wallet]:
         path = standardize_path(path)
         wallet_key = self._wallet_key_from_path(path)
         # wizard will be launched if we return
         if wallet := self._wallets.get(wallet_key):
             return wallet
-        wallet = self._load_wallet(path, password, manual_upgrades=manual_upgrades, config=self.config)
-        if wallet is None:
-            return
+        wallet = self._load_wallet(path, password, upgrade=upgrade, config=self.config)
         wallet.start_network(self.network)
         self.add_wallet(wallet)
         return wallet
@@ -499,26 +499,22 @@ class Daemon(Logger):
             path,
             password,
             *,
-            manual_upgrades: bool = True,
+            upgrade: bool = False,
             config: SimpleConfig,
     ) -> Optional[Abstract_Wallet]:
         path = standardize_path(path)
         storage = WalletStorage(path)
         if not storage.file_exists():
-            return
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
         if storage.is_encrypted():
             if not password:
-                return
+                raise InvalidPassword('No password given')
             storage.decrypt(password)
         # read data, pass it to db
-        db = WalletDB(storage.read(), manual_upgrades=manual_upgrades)
-        if db.requires_split():
-            return
-        if db.requires_upgrade():
-            return
+        db = WalletDB(storage.read(), storage=storage, upgrade=upgrade)
         if db.get_action():
-            return
-        wallet = Wallet(db, storage, config=config)
+            raise WalletUnfinished(db)
+        wallet = Wallet(db, config=config)
         return wallet
 
     @with_wallet_lock
@@ -560,6 +556,9 @@ class Daemon(Logger):
         return True
 
     def run_daemon(self):
+        # init plugins
+        self._plugins = Plugins(self.config, 'cmdline')
+        # block until we are stopping
         try:
             self._stopping_soon_or_errored.wait()
         except KeyboardInterrupt:
@@ -590,6 +589,11 @@ class Daemon(Logger):
                     if self.network:
                         await group.spawn(self.network.stop(full_shutdown=True))
                     await group.spawn(self.taskgroup.cancel_remaining())
+            if self._plugins:
+                self.logger.info("stopping plugins")
+                self._plugins.stop()
+                async with ignore_after(1):
+                    await self._plugins.stopped_event_async.wait()
         finally:
             if self.listen_jsonrpc:
                 self.logger.info("removing lockfile")
@@ -597,18 +601,20 @@ class Daemon(Logger):
             self.logger.info("stopped")
             self._stopped_event.set()
 
-    def run_gui(self, config: 'SimpleConfig', plugins: 'Plugins'):
+    def run_gui(self) -> None:
+        assert self.config
         threading.current_thread().name = 'GUI'
-        gui_name = config.GUI_NAME
+        gui_name = self.config.GUI_NAME
         if gui_name in ['lite', 'classic']:
             gui_name = 'qt'
+        self._plugins = Plugins(self.config, gui_name)  # init plugins
         self.logger.info(f'launching GUI: {gui_name}')
         try:
             try:
                 gui = __import__('electrum.gui.' + gui_name, fromlist=['electrum'])
             except GuiImportError as e:
                 sys.exit(str(e))
-            self.gui_object = gui.ElectrumGui(config=config, daemon=self, plugins=plugins)
+            self.gui_object = gui.ElectrumGui(config=self.config, daemon=self, plugins=self._plugins)
             if not self._stop_entered:
                 self.gui_object.main()
             else:
@@ -642,12 +648,11 @@ class Daemon(Logger):
             #                  hard-to-understand bugs will follow...
             if wallet is None:
                 try:
-                    wallet = self._load_wallet(path, old_password, manual_upgrades=False, config=self.config)
+                    wallet = self._load_wallet(path, old_password, upgrade=True, config=self.config)
                 except util.InvalidPassword:
                     pass
                 except Exception:
                     self.logger.exception(f'failed to load wallet at {path!r}:')
-                    pass
             if wallet is None:
                 failed.append(path)
                 continue

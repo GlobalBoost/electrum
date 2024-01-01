@@ -46,28 +46,34 @@ pr_color = {
     PR_UNCONFIRMED: (.9, .6, .3, 1),
 }
 
-pr_tooltips = {
-    PR_UNPAID:_('Unpaid'),
-    PR_PAID:_('Paid'),
-    PR_UNKNOWN:_('Unknown'),
-    PR_EXPIRED:_('Expired'),
-    PR_INFLIGHT:_('In progress'),
-    PR_BROADCASTING:_('Broadcasting'),
-    PR_BROADCAST:_('Broadcast successfully'),
-    PR_FAILED:_('Failed'),
-    PR_ROUTING: _('Computing route...'),
-    PR_UNCONFIRMED: _('Unconfirmed'),
-}
+
+def pr_tooltips():
+    return {
+        PR_UNPAID: _('Unpaid'),
+        PR_PAID: _('Paid'),
+        PR_UNKNOWN: _('Unknown'),
+        PR_EXPIRED: _('Expired'),
+        PR_INFLIGHT: _('In progress'),
+        PR_BROADCASTING: _('Broadcasting'),
+        PR_BROADCAST: _('Broadcast successfully'),
+        PR_FAILED: _('Failed'),
+        PR_ROUTING: _('Computing route...'),
+        PR_UNCONFIRMED: _('Unconfirmed'),
+    }
+
+
+def pr_expiration_values():
+    return {
+        0: _('Never'),
+        10*60: _('10 minutes'),
+        60*60: _('1 hour'),
+        24*60*60: _('1 day'),
+        7*24*60*60: _('1 week'),
+    }
+
 
 PR_DEFAULT_EXPIRATION_WHEN_CREATING = 24*60*60  # 1 day
-pr_expiration_values = {
-    0: _('Never'),
-    10*60: _('10 minutes'),
-    60*60: _('1 hour'),
-    24*60*60: _('1 day'),
-    7*24*60*60: _('1 week'),
-}
-assert PR_DEFAULT_EXPIRATION_WHEN_CREATING in pr_expiration_values
+assert PR_DEFAULT_EXPIRATION_WHEN_CREATING in pr_expiration_values()
 
 
 def _decode_outputs(outputs) -> Optional[List[PartialTxOutput]]:
@@ -88,19 +94,23 @@ def _decode_outputs(outputs) -> Optional[List[PartialTxOutput]]:
 LN_EXPIRY_NEVER = 100 * 365 * 24 * 60 * 60  # 100 years
 
 
-
 @attr.s
 class BaseInvoice(StoredObject):
     """
     Base class for Invoice and Request
     In the code, we use 'invoice' for outgoing payments, and 'request' for incoming payments.
+
+    TODO this class is getting too complicated for "attrs"... maybe we should rewrite it without.
     """
 
     # mandatory fields
-    amount_msat = attr.ib(kw_only=True)  # type: Optional[Union[int, str]]  # can be '!' or None
+    amount_msat = attr.ib(  # can be '!' or None
+        kw_only=True, on_setattr=attr.setters.validate)  # type: Optional[Union[int, str]]
     message = attr.ib(type=str, kw_only=True)
-    time = attr.ib(type=int, kw_only=True, validator=attr.validators.instance_of(int))  # timestamp of the invoice
-    exp = attr.ib(type=int, kw_only=True, validator=attr.validators.instance_of(int))   # expiration delay (relative). 0 means never
+    time = attr.ib(  # timestamp of the invoice
+        type=int, kw_only=True, validator=attr.validators.instance_of(int), on_setattr=attr.setters.validate)
+    exp = attr.ib(  # expiration delay (relative). 0 means never
+        type=int, kw_only=True, validator=attr.validators.instance_of(int), on_setattr=attr.setters.validate)
 
     # optional fields.
     # an request (incoming) can be satisfied onchain, using lightning or using a swap
@@ -108,10 +118,10 @@ class BaseInvoice(StoredObject):
 
     # onchain only
     outputs = attr.ib(kw_only=True, converter=_decode_outputs)  # type: Optional[List[PartialTxOutput]]
-    height = attr.ib(type=int, kw_only=True, validator=attr.validators.instance_of(int)) # only for receiving
+    height = attr.ib(  # only for receiving
+        type=int, kw_only=True, validator=attr.validators.instance_of(int), on_setattr=attr.setters.validate)
     bip70 = attr.ib(type=str, kw_only=True)  # type: Optional[str]
     #bip70_requestor = attr.ib(type=str, kw_only=True)  # type: Optional[str]
-
 
     def is_lightning(self) -> bool:
         raise NotImplementedError()
@@ -125,7 +135,7 @@ class BaseInvoice(StoredObject):
         raise NotImplementedError()
 
     def get_status_str(self, status):
-        status_str = pr_tooltips[status]
+        status_str = pr_tooltips()[status]
         if status == PR_UNPAID:
             if self.exp > 0 and self.exp != LN_EXPIRY_NEVER:
                 expiration = self.get_expiration_date()
@@ -171,6 +181,19 @@ class BaseInvoice(StoredObject):
         if amount_msat in [None, "!"]:
             return amount_msat
         return int(amount_msat // 1000)
+
+    def set_amount_msat(self, amount_msat: Union[int, str]) -> None:
+        """The GUI uses this to fill the amount for a zero-amount invoice."""
+        if amount_msat == "!":
+            amount_sat = amount_msat
+        else:
+            assert isinstance(amount_msat, int), f"{amount_msat=!r}"
+            assert amount_msat >= 0, amount_msat
+            amount_sat = (amount_msat // 1000) + int(amount_msat % 1000 > 0)  # round up
+        if outputs := self.outputs:
+            assert len(self.outputs) == 1, len(self.outputs)
+            self.outputs = [PartialTxOutput(scriptpubkey=outputs[0].scriptpubkey, value=amount_sat)]
+        self.amount_msat = amount_msat
 
     @amount_msat.validator
     def _validate_amount(self, attribute, value):
@@ -285,7 +308,7 @@ class Invoice(BaseInvoice):
 
     def can_be_paid_onchain(self) -> bool:
         if self.is_lightning():
-            return bool(self._lnaddr.get_fallback_address())
+            return bool(self._lnaddr.get_fallback_address()) or (bool(self.outputs))
         else:
             return True
 

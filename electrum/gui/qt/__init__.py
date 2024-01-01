@@ -26,25 +26,23 @@
 import os
 import signal
 import sys
-import traceback
 import threading
 from typing import Optional, TYPE_CHECKING, List, Sequence
-
-from electrum import GuiImportError
 
 try:
     import PyQt5
     import PyQt5.QtGui
 except Exception as e:
+    from electrum import GuiImportError
     raise GuiImportError(
-        "Error: Could not import PyQt5 on Linux systems, "
+        "Error: Could not import PyQt5. On Linux systems, "
         "you may try 'sudo apt-get install python3-pyqt5'") from e
 
 from PyQt5.QtGui import QGuiApplication
-from PyQt5.QtWidgets import (QApplication, QSystemTrayIcon, QWidget, QMenu,
-                             QMessageBox)
+from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QWidget, QMenu, QMessageBox
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer, Qt
 import PyQt5.QtCore as QtCore
+sys._GUI_QT_VERSION = 5  # used by gui/common_qt
 
 try:
     # Preload QtMultimedia at app start, if available.
@@ -56,23 +54,26 @@ except ImportError as e:
 
 from electrum.i18n import _, set_language
 from electrum.plugin import run_hook
-from electrum.base_wizard import GoBack
 from electrum.util import (UserCancelled, profiler, send_exception_to_crash_reporter,
-                           WalletFileException, BitcoinException, get_new_wallet_name)
+                           WalletFileException, BitcoinException, get_new_wallet_name, InvalidPassword)
 from electrum.wallet import Wallet, Abstract_Wallet
-from electrum.wallet_db import WalletDB
+from electrum.wallet_db import WalletDB, WalletRequiresSplit, WalletRequiresUpgrade, WalletUnfinished
 from electrum.logging import Logger
 from electrum.gui import BaseElectrumGui
 from electrum.simple_config import SimpleConfig
+from electrum.storage import WalletStorage
+from electrum.wizard import WizardViewState
+from electrum.keystore import load_keystore
 
-from .installwizard import InstallWizard, WalletAlreadyOpenInMemory
-from .util import read_QIcon, ColorScheme, custom_message_box, MessageBoxMixin
+from .util import read_QIcon, ColorScheme, custom_message_box, MessageBoxMixin, WWLabel
 from .main_window import ElectrumWindow
 from .network_dialog import NetworkDialog
 from .stylesheet_patcher import patch_qt_stylesheet
 from .lightning_dialog import LightningDialog
 from .watchtower_dialog import WatchtowerDialog
 from .exception_window import Exception_Hook
+from .wizard.server_connect import QEServerConnectWizard
+from .wizard.wallet import QENewWalletWizard
 
 if TYPE_CHECKING:
     from electrum.daemon import Daemon
@@ -147,6 +148,9 @@ class ElectrumGui(BaseElectrumGui, Logger):
         # maybe set dark theme
         self._default_qtstylesheet = self.app.styleSheet()
         self.reload_app_stylesheet()
+
+        # always load 2fa
+        self.plugins.load_plugin('trustedcoin')
 
         run_hook('init_qt', self)
 
@@ -340,6 +344,14 @@ class ElectrumGui(BaseElectrumGui, Logger):
         if not force_wizard:
             try:
                 wallet = self.daemon.load_wallet(path, None)
+            except FileNotFoundError:
+                pass  # open with wizard below
+            except InvalidPassword:
+                pass  # open with wizard below
+            except WalletRequiresSplit:
+                pass  # open with wizard below
+            except WalletRequiresUpgrade:
+                pass  # open with wizard below
             except Exception as e:
                 self.logger.exception('')
                 err_text = str(e) if isinstance(e, WalletFileException) else repr(e)
@@ -398,27 +410,63 @@ class ElectrumGui(BaseElectrumGui, Logger):
         return window
 
     def _start_wizard_to_select_or_create_wallet(self, path) -> Optional[Abstract_Wallet]:
-        wizard = InstallWizard(self.config, self.app, self.plugins, gui_object=self)
+        wizard = QENewWalletWizard(self.config, self.app, self.plugins, self.daemon, path)
+        result = wizard.exec()
+        # TODO: use dialog.open() instead to avoid new event loop spawn?
+        self.logger.info(f'wizard dialog exec result={result}')
+        if result == QENewWalletWizard.Rejected:
+            self.logger.info('wizard dialog cancelled by user')
+            return
+
+        d = wizard.get_wizard_data()
+
+        if d['wallet_is_open']:
+            for window in self.windows:
+                if window.wallet.storage.path == d['wallet_name']:
+                    return window.wallet
+            raise Exception('found by wizard but not here?!')
+
+        if not d['wallet_exists']:
+            self.logger.info('about to create wallet')
+            wizard.create_storage()
+            if d['wallet_type'] == '2fa' and 'x3' not in d:
+                return
+            wallet_file = wizard.path
+        else:
+            wallet_file = d['wallet_name']
+
         try:
-            path, storage = wizard.select_storage(path, self.daemon.get_wallet)
-            # storage is None if file does not exist
-            if storage is None:
-                wizard.path = path  # needed by trustedcoin plugin
-                wizard.run('new')
-                storage, db = wizard.create_storage(path)
+            wallet = self.daemon.load_wallet(wallet_file, d['password'], upgrade=True)
+            return wallet
+        except WalletRequiresSplit as e:
+            wizard.run_split(wallet_file, e._split_data)
+            return
+        except WalletUnfinished as e:
+            # wallet creation is not complete, 2fa online phase
+            db = e._wallet_db
+            action = db.get_action()
+            assert action[1] == 'accept_terms_of_use', 'only support for resuming trustedcoin split setup'
+            k1 = load_keystore(db, 'x1')
+            if 'password' in d and d['password']:
+                xprv = k1.get_master_private_key(d['password'])
             else:
-                db = WalletDB(storage.read(), manual_upgrades=False)
-                wizard.run_upgrades(storage, db)
-        except (UserCancelled, GoBack):
-            return
-        except WalletAlreadyOpenInMemory as e:
-            return e.wallet
-        finally:
-            wizard.terminate()
-        # return if wallet creation is not complete
-        if storage is None or db.get_action():
-            return
-        wallet = Wallet(db, storage, config=self.config)
+                xprv = db.get('x1')['xprv']
+            data = {
+                'wallet_name': os.path.basename(wallet_file),
+                'xprv1': xprv,
+                'xpub1': db.get('x1')['xpub'],
+                'xpub2': db.get('x2')['xpub'],
+            }
+            wizard = QENewWalletWizard(self.config, self.app, self.plugins, self.daemon, path,
+                                       start_viewstate=WizardViewState('trustedcoin_tos', data, {}))
+            result = wizard.exec()
+            if result == QENewWalletWizard.Rejected:
+                self.logger.info('wizard dialog cancelled by user')
+                return
+            db.put('x3', wizard.get_wizard_data()['x3'])
+            db.write()
+
+        wallet = Wallet(db, config=self.config)
         wallet.start_network(self.daemon.network)
         self.daemon.add_wallet(wallet)
         return wallet
@@ -438,9 +486,12 @@ class ElectrumGui(BaseElectrumGui, Logger):
         if self.daemon.network:
             # first-start network-setup
             if not self.config.cv.NETWORK_AUTO_CONNECT.is_set():
-                wizard = InstallWizard(self.config, self.app, self.plugins, gui_object=self)
-                wizard.init_network(self.daemon.network)
-                wizard.terminate()
+                dialog = QEServerConnectWizard(self.config, self.app, self.plugins, self.daemon)
+                result = dialog.exec()
+                if result == QEServerConnectWizard.Rejected:
+                    self.logger.info('network wizard dialog cancelled by user')
+                    raise UserCancelled()
+
             # start network
             self.daemon.start_network()
 
@@ -456,8 +507,6 @@ class ElectrumGui(BaseElectrumGui, Logger):
         try:
             self.init_network()
         except UserCancelled:
-            return
-        except GoBack:
             return
         except Exception as e:
             self.logger.exception('')

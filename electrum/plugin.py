@@ -29,7 +29,7 @@ import time
 import threading
 import sys
 from typing import (NamedTuple, Any, Union, TYPE_CHECKING, Optional, Tuple,
-                    Dict, Iterable, List, Sequence, Callable, TypeVar, Mapping)
+                    Dict, Iterable, List, Sequence, Callable, TypeVar, Mapping, Set)
 import concurrent
 from concurrent import futures
 from functools import wraps, partial
@@ -56,12 +56,13 @@ hooks = {}
 class Plugins(DaemonThread):
 
     LOGGING_SHORTCUT = 'p'
+    pkgpath = os.path.dirname(plugins.__file__)
+    _all_found_plugins = None  # type: Optional[Dict[str, dict]]
 
     @profiler
     def __init__(self, config: SimpleConfig, gui_name):
         DaemonThread.__init__(self)
         self.name = 'Plugins'  # set name of thread
-        self.pkgpath = os.path.dirname(plugins.__file__)
         self.config = config
         self.hw_wallets = {}
         self.plugins = {}  # type: Dict[str, BasePlugin]
@@ -72,21 +73,41 @@ class Plugins(DaemonThread):
         self.add_jobs(self.device_manager.thread_jobs())
         self.start()
 
+    @classmethod
+    def find_all_plugins(cls) -> Mapping[str, dict]:
+        """Return a map of all found plugins: name -> description.
+        Note that plugins not available for the current GUI are also included.
+        """
+        if cls._all_found_plugins is None:
+            cls._all_found_plugins = dict()
+            iter_modules = list(pkgutil.iter_modules([cls.pkgpath]))
+            for loader, name, ispkg in iter_modules:
+                # FIXME pyinstaller binaries are packaging each built-in plugin twice:
+                #       once as data and once as code. To honor the "no duplicates" rule below,
+                #       we exclude the ones packaged as *code*, here:
+                if loader.__class__.__qualname__ == "FrozenImporter":
+                    continue
+                full_name = f'electrum.plugins.{name}'
+                spec = importlib.util.find_spec(full_name)
+                if spec is None:  # pkgutil found it but importlib can't ?!
+                    raise Exception(f"Error pre-loading {full_name}: no spec")
+                try:
+                    module = importlib.util.module_from_spec(spec)
+                    # sys.modules needs to be modified for relative imports to work
+                    # see https://stackoverflow.com/a/50395128
+                    sys.modules[spec.name] = module
+                    spec.loader.exec_module(module)
+                except Exception as e:
+                    raise Exception(f"Error pre-loading {full_name}: {repr(e)}") from e
+                d = module.__dict__
+                if name in cls._all_found_plugins:
+                    _logger.info(f"Found the following plugin modules: {iter_modules=}")
+                    raise Exception(f"duplicate plugins? for {name=}")
+                cls._all_found_plugins[name] = d
+        return cls._all_found_plugins
+
     def load_plugins(self):
-        for loader, name, ispkg in pkgutil.iter_modules([self.pkgpath]):
-            full_name = f'electrum.plugins.{name}'
-            spec = importlib.util.find_spec(full_name)
-            if spec is None:  # pkgutil found it but importlib can't ?!
-                raise Exception(f"Error pre-loading {full_name}: no spec")
-            try:
-                module = importlib.util.module_from_spec(spec)
-                # sys.modules needs to be modified for relative imports to work
-                # see https://stackoverflow.com/a/50395128
-                sys.modules[spec.name] = module
-                spec.loader.exec_module(module)
-            except Exception as e:
-                raise Exception(f"Error pre-loading {full_name}: {repr(e)}") from e
-            d = module.__dict__
+        for name, d in self.find_all_plugins().items():
             gui_good = self.gui_name in d.get('available_for', [])
             if not gui_good:
                 continue
@@ -110,6 +131,9 @@ class Plugins(DaemonThread):
         return len(self.plugins)
 
     def load_plugin(self, name) -> 'BasePlugin':
+        """Imports the code of the given plugin.
+        note: can be called from any thread.
+        """
         if name in self.plugins:
             return self.plugins[name]
         full_name = f'electrum.plugins.{name}.{self.gui_name}'
@@ -125,7 +149,7 @@ class Plugins(DaemonThread):
             raise Exception(f"Error loading {name} plugin: {repr(e)}") from e
         self.add_jobs(plugin.thread_jobs())
         self.plugins[name] = plugin
-        self.logger.info(f"loaded {name}")
+        self.logger.info(f"loaded plugin {name!r}. (from thread: {threading.current_thread().name!r})")
         return plugin
 
     def close_plugin(self, plugin):
@@ -146,6 +170,15 @@ class Plugins(DaemonThread):
         self.plugins.pop(name)
         p.close()
         self.logger.info(f"closed {name}")
+
+    @classmethod
+    def is_plugin_enabler_config_key(cls, key: str) -> bool:
+        if not key.startswith('use_'):
+            return False
+        # note: the 'use_' prefix is not sufficient to check, there are
+        #       non-plugin-related config keys that also have it... hence:
+        name = key[4:]
+        return name in cls.find_all_plugins()
 
     def toggle(self, name: str) -> Optional['BasePlugin']:
         p = self.get(name)
@@ -209,7 +242,7 @@ class Plugins(DaemonThread):
 
     def run(self):
         while self.is_running():
-            time.sleep(0.1)
+            self.wake_up_event.wait(0.1)  # time.sleep(0.1) OR event
             self.run_jobs()
         self.on_stop()
 
@@ -343,6 +376,16 @@ _hwd_comms_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix='hwd_comms_thread'
 )
+
+# hidapi needs to be imported from the main thread. Otherwise, at least on macOS,
+# segfaults will follow. (see https://github.com/trezor/cython-hidapi/pull/150#issuecomment-1542391087)
+# To keep it simple, let's just import it now, as we are likely in the main thread here.
+if threading.current_thread() is not threading.main_thread():
+    _logger.warning("expected to be in main thread... hidapi will not be safe to use now!")
+try:
+    import hid
+except ImportError:
+    pass
 
 
 T = TypeVar('T')

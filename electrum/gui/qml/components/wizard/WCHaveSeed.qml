@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.1
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -18,17 +18,20 @@ WizardComponent {
     property int participants: 0
     property string multisigMasterPubkey: wizard_data['multisig_master_pubkey']
 
+    property string _seedType
+    property string _validationMessage
+
     function apply() {
         if (cosigner) {
             wizard_data['multisig_cosigner_data'][cosigner.toString()]['seed'] = seedtext.text
             wizard_data['multisig_cosigner_data'][cosigner.toString()]['seed_variant'] = seed_variant_cb.currentValue
-            wizard_data['multisig_cosigner_data'][cosigner.toString()]['seed_type'] = bitcoin.seedType
+            wizard_data['multisig_cosigner_data'][cosigner.toString()]['seed_type'] = _seedType
             wizard_data['multisig_cosigner_data'][cosigner.toString()]['seed_extend'] = extendcb.checked
             wizard_data['multisig_cosigner_data'][cosigner.toString()]['seed_extra_words'] = extendcb.checked ? customwordstext.text : ''
         } else {
             wizard_data['seed'] = seedtext.text
             wizard_data['seed_variant'] = seed_variant_cb.currentValue
-            wizard_data['seed_type'] = bitcoin.seedType
+            wizard_data['seed_type'] = _seedType
             wizard_data['seed_extend'] = extendcb.checked
             wizard_data['seed_extra_words'] = extendcb.checked ? customwordstext.text : ''
 
@@ -38,7 +41,7 @@ WizardComponent {
                 wizard_data['script_type'] = {
                     'standard': 'p2sh',
                     'segwit': 'p2wsh'
-                }[bitcoin.seedType]
+                }[_seedType]
             }
         }
     }
@@ -66,11 +69,18 @@ WizardComponent {
 
     function checkValid() {
         valid = false
-        validationtext.text = ''
+        _validationMessage = ''
 
-        var validSeed = bitcoin.verifySeed(seedtext.text, seed_variant_cb.currentValue, wizard_data['wallet_type'])
-        if (!cosigner || !validSeed) {
-            valid = validSeed
+        if (extendcb.checked && customwordstext.text == '')
+            return
+
+        var verifyResult = wiz.verifySeed(seedtext.text, seed_variant_cb.currentValue, wizard_data['wallet_type'])
+
+        _validationMessage = verifyResult.message
+        _seedType = verifyResult.type
+
+        if (!cosigner || !verifyResult.valid) {
+            valid = verifyResult.valid
             return
         } else {
             // bip39 validate after derivation path is known
@@ -179,7 +189,7 @@ WizardComponent {
 
             InfoTextArea {
                 id: infotext
-                visible: !cosigner
+                visible: !cosigner && !is2fa
                 Layout.fillWidth: true
                 Layout.columnSpan: 2
                 Layout.bottomMargin: constants.paddingLarge
@@ -193,47 +203,45 @@ WizardComponent {
                 placeholderText: cosigner ? qsTr('Enter cosigner seed') : qsTr('Enter your seed')
 
                 indicatorValid: root.valid
-
+                    ? root._seedType == 'bip39' && root._validationMessage
+                        ? false
+                        : root.valid
+                    : root.valid
+                indicatorText: root.valid
+                    ? root._validationMessage
+                        ? root._validationMessage
+                        : root._seedType
+                    : ''
                 onTextChanged: {
                     startValidationTimer()
                 }
             }
-            TextArea {
-                id: validationtext
-                visible: text
-                Layout.fillWidth: true
-                readOnly: true
-                wrapMode: TextInput.WordWrap
-                background: Rectangle {
-                    color: 'transparent'
-                }
-            }
 
-            CheckBox {
+            ElCheckBox {
                 id: extendcb
                 Layout.columnSpan: 2
+                Layout.fillWidth: true
                 text: qsTr('Extend seed with custom words')
                 onCheckedChanged: startValidationTimer()
             }
+
             TextField {
                 id: customwordstext
                 visible: extendcb.checked
                 Layout.fillWidth: true
                 Layout.columnSpan: 2
                 placeholderText: qsTr('Enter your custom word(s)')
+                inputMethodHints: Qt.ImhNoPredictiveText
+
                 onTextChanged: startValidationTimer()
             }
         }
     }
 
-    Bitcoin {
-        id: bitcoin
-        onSeedTypeChanged: seedtext.indicatorText = bitcoin.seedType
-    }
-
     function startValidationTimer() {
         valid = false
-        seedtext.indicatorText = ''
+        root._seedType = ''
+        root._validationMessage = ''
         validationTimer.restart()
     }
 

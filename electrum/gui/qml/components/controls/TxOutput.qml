@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.0
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -10,33 +10,78 @@ TextHighlightPane {
 
     property variant model
     property bool allowShare: true
+    property bool allowClickAddress: true
+    property int idx: -1
 
     RowLayout {
         width: parent.width
-        Label {
-            text: model.address
+
+        ColumnLayout {
             Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            font.pixelSize: constants.fontSizeLarge
-            font.family: FixedFont
-            color: model.is_mine
-                ? model.is_change
-                    ? constants.colorAddressInternal
-                    : constants.colorAddressExternal
-                : model.is_billing
-                    ? constants.colorAddressBilling
-                    : Material.foreground
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Label {
+                    Layout.rightMargin: constants.paddingLarge
+                    text: '#' + idx
+                    visible: idx >= 0
+                    font.family: FixedFont
+                    font.pixelSize: constants.fontSizeMedium
+                    font.bold: true
+                }
+                Label {
+                    Layout.fillWidth: true
+                    font.family: FixedFont
+                    text: model.short_id
+                }
+                Label {
+                    text: Config.formatSats(model.value)
+                    font.pixelSize: constants.fontSizeMedium
+                    font.family: FixedFont
+                }
+                Label {
+                    text: Config.baseUnit
+                    font.pixelSize: constants.fontSizeMedium
+                    color: Material.accentColor
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                antialiasing: true
+                color: constants.mutedForeground
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: model.address
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    font.pixelSize: constants.fontSizeMedium
+                    font.family: FixedFont
+                    color: model.is_mine
+                        ? model.is_change
+                            ? constants.colorAddressInternal
+                            : constants.colorAddressExternal
+                        : model.is_billing
+                            ? constants.colorAddressBilling
+                            : Material.foreground
+                    TapHandler {
+                        enabled: allowClickAddress && model.is_mine
+                        onTapped: {
+                            app.stack.push(Qt.resolvedUrl('../AddressDetails.qml'), {
+                                address: model.address
+                            })
+                        }
+                    }
+                }
+            }
+
         }
-        Label {
-            text: Config.formatSats(model.value)
-            font.pixelSize: constants.fontSizeMedium
-            font.family: FixedFont
-        }
-        Label {
-            text: Config.baseUnit
-            font.pixelSize: constants.fontSizeMedium
-            color: Material.accentColor
-        }
+
         ToolButton {
             visible: allowShare
             icon.source: Qt.resolvedUrl('../../../icons/share.png')
@@ -49,6 +94,7 @@ TextHighlightPane {
                 dialog.open()
             }
         }
+
     }
 }
 

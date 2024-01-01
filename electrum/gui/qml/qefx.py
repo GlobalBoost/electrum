@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, QRegularExpression
+from PyQt6.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, QRegularExpression
 
 from electrum.bitcoin import COIN
 from electrum.exchange_rate import FxThread
@@ -10,6 +10,7 @@ from electrum.simple_config import SimpleConfig
 
 from .qetypes import QEAmount
 from .util import QtEventListener, event_listener
+
 
 class QEFX(QObject, QtEventListener):
     _logger = get_logger(__name__)
@@ -94,7 +95,7 @@ class QEFX(QObject, QtEventListener):
             self.fx.set_exchange(source)
             self.rateSourceChanged.emit()
 
-    enabledUpdated = pyqtSignal() # curiously, enabledChanged is clashing, so name it enabledUpdated
+    enabledUpdated = pyqtSignal()  # curiously, enabledChanged is clashing, so name it enabledUpdated
     @pyqtProperty(bool, notify=enabledUpdated)
     def enabled(self):
         return self.fx.is_enabled()

@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Controls 2.3
-import QtQuick.Layouts 1.0
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -35,7 +35,7 @@ ElDialog {
             text: swaphelper.userinfo
             iconStyle: swaphelper.state == SwapHelper.Started
                 ? InfoTextArea.IconStyle.Spinner
-                : swaphelper.state == SwapHelper.Failed
+                : swaphelper.state == SwapHelper.Failed || swaphelper.state == SwapHelper.Cancelled
                     ? InfoTextArea.IconStyle.Error
                     : swaphelper.state == SwapHelper.Success
                         ? InfoTextArea.IconStyle.Done
@@ -251,15 +251,31 @@ ElDialog {
 
         Item { Layout.fillHeight: true; Layout.preferredWidth: 1 }
 
-        FlatButton {
+        ButtonContainer {
             Layout.columnSpan: 2
             Layout.fillWidth: true
-            text: qsTr('Ok')
-            icon.source: Qt.resolvedUrl('../../icons/confirmed.png')
-            enabled: swaphelper.valid && (swaphelper.state == SwapHelper.ServiceReady || swaphelper.state == SwapHelper.Failed)
+            FlatButton {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                text: qsTr('Ok')
+                icon.source: Qt.resolvedUrl('../../icons/confirmed.png')
+                visible: !swaphelper.canCancel
+                enabled: swaphelper.valid && (swaphelper.state == SwapHelper.ServiceReady || swaphelper.state == SwapHelper.Failed)
 
-            onClicked: {
-                swaphelper.executeSwap()
+                onClicked: {
+                    swaphelper.executeSwap()
+                }
+            }
+            FlatButton {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                text: qsTr('Cancel')
+                icon.source: Qt.resolvedUrl('../../icons/closebutton.png')
+                visible: swaphelper.canCancel
+
+                onClicked: {
+                    swaphelper.cancelNormalSwap()
+                }
             }
         }
     }

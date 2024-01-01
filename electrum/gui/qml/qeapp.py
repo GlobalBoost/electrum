@@ -5,13 +5,12 @@ import os
 import sys
 import html
 import threading
-import asyncio
 from typing import TYPE_CHECKING, Set
 
-from PyQt5.QtCore import (pyqtSlot, pyqtSignal, pyqtProperty, QObject, QUrl, QLocale,
+from PyQt6.QtCore import (pyqtSlot, pyqtSignal, pyqtProperty, QObject, QT_VERSION_STR, PYQT_VERSION_STR,
                           qInstallMessageHandler, QTimer, QSortFilterProxyModel)
-from PyQt5.QtGui import QGuiApplication, QFontDatabase
-from PyQt5.QtQml import qmlRegisterType, qmlRegisterUncreatableType, QQmlApplicationEngine
+from PyQt6.QtGui import QGuiApplication, QFontDatabase, QScreen
+from PyQt6.QtQml import qmlRegisterType, qmlRegisterUncreatableType, QQmlApplicationEngine
 
 from electrum import version, constants
 from electrum.i18n import _
@@ -26,7 +25,7 @@ from .qedaemon import QEDaemon
 from .qenetwork import QENetwork
 from .qewallet import QEWallet
 from .qeqr import QEQRParser, QEQRImageProvider, QEQRImageProviderHelper
-from .qewalletdb import QEWalletDB
+from .qeqrscanner import QEQRScanner
 from .qebitcoin import QEBitcoin
 from .qefx import QEFX
 from .qetxfinalizer import QETxFinalizer, QETxRbfFeeBumper, QETxCpfpFeeBumper, QETxCanceller
@@ -61,6 +60,7 @@ if 'ANDROID_DATA' in os.environ:
 
 notification = None
 
+
 class QEAppController(BaseCrashReporter, QObject):
     _dummy = pyqtSignal()
     userNotify = pyqtSignal(str, str)
@@ -70,6 +70,7 @@ class QEAppController(BaseCrashReporter, QObject):
     sendingBugreportSuccess = pyqtSignal(str)
     sendingBugreportFailure = pyqtSignal(str)
     secureWindowChanged = pyqtSignal()
+    wantCloseChanged = pyqtSignal()
 
     def __init__(self, qeapp: 'ElectrumQmlApplication', qedaemon: 'QEDaemon', plugins: 'Plugins'):
         BaseCrashReporter.__init__(self, None, None, None)
@@ -100,6 +101,8 @@ class QEAppController(BaseCrashReporter, QObject):
 
         if self.isAndroid():
             self.bindIntent()
+
+        self._want_close = False
 
     def on_wallet_loaded(self):
         qewallet = self._qedaemon.currentWallet
@@ -179,6 +182,16 @@ class QEAppController(BaseCrashReporter, QObject):
         self._app_started = True
         if self._intent:
             self.on_new_intent(self._intent)
+
+    @pyqtProperty(bool, notify=wantCloseChanged)
+    def wantClose(self):
+        return self._want_close
+
+    @wantClose.setter
+    def wantClose(self, want_close):
+        if want_close != self._want_close:
+            self._want_close = want_close
+            self.wantCloseChanged.emit()
 
     @pyqtSlot(str, str)
     def doShare(self, data, title):
@@ -314,10 +327,13 @@ class QEAppController(BaseCrashReporter, QObject):
     def secureWindow(self, secure):
         if not self.isAndroid():
             return
+        if self.config.GUI_QML_ALWAYS_ALLOW_SCREENSHOTS:
+            return
         if self._secureWindow != secure:
             jpythonActivity.setSecureWindow(secure)
             self._secureWindow = secure
             self.secureWindowChanged.emit()
+
 
 class ElectrumQmlApplication(QGuiApplication):
 
@@ -330,10 +346,17 @@ class ElectrumQmlApplication(QGuiApplication):
 
         ElectrumQmlApplication._daemon = daemon
 
+        # TODO QT6 order of declaration is important now?
+        qmlRegisterType(QEAmount, 'org.electrum', 1, 0, 'Amount')
+        qmlRegisterType(QENewWalletWizard, 'org.electrum', 1, 0, 'QNewWalletWizard')
+        qmlRegisterType(QEServerConnectWizard, 'org.electrum', 1, 0, 'QServerConnectWizard')
+        qmlRegisterType(QEFilterProxyModel, 'org.electrum', 1, 0, 'FilterProxyModel')
+        qmlRegisterType(QSortFilterProxyModel, 'org.electrum', 1, 0, 'QSortFilterProxyModel')
+
         qmlRegisterType(QEWallet, 'org.electrum', 1, 0, 'Wallet')
-        qmlRegisterType(QEWalletDB, 'org.electrum', 1, 0, 'WalletDB')
         qmlRegisterType(QEBitcoin, 'org.electrum', 1, 0, 'Bitcoin')
         qmlRegisterType(QEQRParser, 'org.electrum', 1, 0, 'QRParser')
+        qmlRegisterType(QEQRScanner, 'org.electrum', 1, 0, 'QRScanner')
         qmlRegisterType(QEFX, 'org.electrum', 1, 0, 'FX')
         qmlRegisterType(QETxFinalizer, 'org.electrum', 1, 0, 'TxFinalizer')
         qmlRegisterType(QEInvoice, 'org.electrum', 1, 0, 'Invoice')
@@ -350,19 +373,21 @@ class ElectrumQmlApplication(QGuiApplication):
         qmlRegisterType(QETxCanceller, 'org.electrum', 1, 0, 'TxCanceller')
         qmlRegisterType(QEBip39RecoveryListModel, 'org.electrum', 1, 0, 'Bip39RecoveryListModel')
 
-        qmlRegisterUncreatableType(QEAmount, 'org.electrum', 1, 0, 'Amount', 'Amount can only be used as property')
-        qmlRegisterUncreatableType(QENewWalletWizard, 'org.electrum', 1, 0, 'QNewWalletWizard', 'QNewWalletWizard can only be used as property')
-        qmlRegisterUncreatableType(QEServerConnectWizard, 'org.electrum', 1, 0, 'QServerConnectWizard', 'QServerConnectWizard can only be used as property')
-        qmlRegisterUncreatableType(QEFilterProxyModel, 'org.electrum', 1, 0, 'FilterProxyModel', 'FilterProxyModel can only be used as property')
-        qmlRegisterUncreatableType(QSortFilterProxyModel, 'org.electrum', 1, 0, 'QSortFilterProxyModel', 'QSortFilterProxyModel can only be used as property')
+        # TODO QT6: these were declared as uncreatable, but that doesn't seem to work for pyqt6
+        # qmlRegisterUncreatableType(QEAmount, 'org.electrum', 1, 0, 'Amount', 'Amount can only be used as property')
+        # qmlRegisterUncreatableType(QENewWalletWizard, 'org.electrum', 1, 0, 'QNewWalletWizard', 'QNewWalletWizard can only be used as property')
+        # qmlRegisterUncreatableType(QEServerConnectWizard, 'org.electrum', 1, 0, 'QServerConnectWizard', 'QServerConnectWizard can only be used as property')
+        # qmlRegisterUncreatableType(QEFilterProxyModel, 'org.electrum', 1, 0, 'FilterProxyModel', 'FilterProxyModel can only be used as property')
+        # qmlRegisterUncreatableType(QSortFilterProxyModel, 'org.electrum', 1, 0, 'QSortFilterProxyModel', 'QSortFilterProxyModel can only be used as property')
 
         self.engine = QQmlApplicationEngine(parent=self)
 
         screensize = self.primaryScreen().size()
 
-        self.qr_ip = QEQRImageProvider((7/8)*min(screensize.width(), screensize.height()))
+        qr_size = min(screensize.width(), screensize.height()) * 7/8
+        self.qr_ip = QEQRImageProvider(qr_size)
         self.engine.addImageProvider('qrgen', self.qr_ip)
-        self.qr_ip_h = QEQRImageProviderHelper((7/8)*min(screensize.width(), screensize.height()))
+        self.qr_ip_h = QEQRImageProviderHelper(qr_size)
 
         # add a monospace font as we can't rely on device having one
         self.fixedFont = 'PT Mono'
@@ -376,7 +401,7 @@ class ElectrumQmlApplication(QGuiApplication):
         self.plugins = plugins
         self._qeconfig = QEConfig(config)
         self._qenetwork = QENetwork(daemon.network, self._qeconfig)
-        self.daemon = QEDaemon(daemon)
+        self.daemon = QEDaemon(daemon, self.plugins)
         self.appController = QEAppController(self, self.daemon, self.plugins)
         self._maxAmount = QEAmount(is_max=True)
         self.context.setContextProperty('AppController', self.appController)
@@ -388,8 +413,9 @@ class ElectrumQmlApplication(QGuiApplication):
         self.context.setContextProperty('QRIP', self.qr_ip_h)
         self.context.setContextProperty('BUILD', {
             'electrum_version': version.ELECTRUM_VERSION,
-            'apk_version': version.APK_VERSION,
-            'protocol_version': version.PROTOCOL_VERSION
+            'protocol_version': version.PROTOCOL_VERSION,
+            'qt_version': QT_VERSION_STR,
+            'pyqt_version': PYQT_VERSION_STR
         })
 
         self.plugins.load_plugin('trustedcoin')
@@ -412,6 +438,7 @@ class ElectrumQmlApplication(QGuiApplication):
         if re.search('file:///.*TypeError: Cannot read property.*null$', file):
             return
         self.logger.warning(file)
+
 
 class Exception_Hook(QObject, Logger):
     _report_exception = pyqtSignal(object, object, object, object)

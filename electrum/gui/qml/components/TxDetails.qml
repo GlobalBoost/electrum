@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -50,29 +50,62 @@ Pane {
                     }
 
                     InfoTextArea {
+                        id: warn
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: constants.paddingLarge
+                        visible: txdetails.warning
+                        text: txdetails.warning
+                        iconStyle: InfoTextArea.IconStyle.Warn
+                    }
+
+                    InfoTextArea {
                         id: bumpfeeinfo
                         Layout.columnSpan: 2
                         Layout.fillWidth: true
                         Layout.bottomMargin: constants.paddingLarge
-                        visible: txdetails.canBump || txdetails.canCpfp || txdetails.canCancel || txdetails.canRemove || txdetails.isUnrelated
+                        visible: txdetails.isUnrelated || !txdetails.isMined
                         text: txdetails.isUnrelated
-                            ? qsTr('Transaction is unrelated to this wallet')
-                            : txdetails.canRemove
-                                ? qsTr('This transaction is local to your wallet. It has not been published yet.')
-                                : qsTr('This transaction is still unconfirmed.') + '\n' + (txdetails.canCancel
-                                    ? qsTr('You can bump its fee to speed up its confirmation, or cancel this transaction')
-                                    : qsTr('You can bump its fee to speed up its confirmation'))
+                            ? qsTr('Transaction is unrelated to this wallet.')
+                            : txdetails.inMempool
+                                ? qsTr('This transaction is still unconfirmed.') +
+                                    (txdetails.canBump || txdetails.canCpfp || txdetails.canCancel
+                                        ? txdetails.canCancel
+                                            ? '\n' + qsTr('You can bump its fee to speed up its confirmation, or cancel this transaction.')
+                                            : '\n' + qsTr('You can bump its fee to speed up its confirmation.')
+                                        : '')
+                                : txdetails.lockDelay
+                                    ? qsTr('This transaction is local to your wallet and locked for the next %1 blocks.').arg(txdetails.lockDelay)
+                                    : txdetails.isComplete
+                                        ? qsTr('This transaction is local to your wallet. It has not been published yet.')
+                                        : txdetails.canSign
+                                            ? qsTr('This transaction is not fully signed and can be signed by this wallet.')
+                                            : qsTr('This transaction is not fully signed.') + '\n' +
+                                              (txdetails.wallet.isWatchOnly
+                                                  ? qsTr('Present this transaction to the signing wallet.')
+                                                  : qsTr('Present this transaction to the next cosigner.'))
                         iconStyle: txdetails.isUnrelated
                             ? InfoTextArea.IconStyle.Warn
                             : InfoTextArea.IconStyle.Info
                     }
 
                     Label {
-                        visible: !txdetails.isUnrelated && txdetails.lnAmount.satsInt == 0
+                        Layout.preferredWidth: 1
+                        Layout.fillWidth: true
+                        visible: !txdetails.isUnrelated && txdetails.amount.satsInt != 0
                         text: txdetails.amount.satsInt > 0
-                                ? qsTr('Amount received')
-                                : qsTr('Amount sent')
+                                ? qsTr('Amount received onchain')
+                                : qsTr('Amount sent onchain')
                         color: Material.accentColor
+                        wrapMode: Text.Wrap
+                    }
+
+                    FormattedAmount {
+                        Layout.preferredWidth: 1
+                        Layout.fillWidth: true
+                        visible: !txdetails.isUnrelated && txdetails.amount.satsInt != 0
+                        amount: txdetails.amount
+                        timestamp: txdetails.timestamp
                     }
 
                     Label {
@@ -86,7 +119,7 @@ Pane {
                     }
 
                     FormattedAmount {
-                        visible: !txdetails.isUnrelated
+                        visible: !txdetails.isUnrelated && txdetails.lnAmount.satsInt != 0
                         Layout.preferredWidth: 1
                         Layout.fillWidth: true
                         amount: txdetails.lnAmount.isEmpty ? txdetails.amount : txdetails.lnAmount
@@ -269,19 +302,46 @@ Pane {
                         }
                     }
 
-                    Label {
+                    ToggleLabel {
+                        id: inputs_label
                         Layout.columnSpan: 2
-                        Layout.topMargin: constants.paddingSmall
-                        text: qsTr('Outputs')
+                        Layout.topMargin: constants.paddingMedium
+
+                        labelText: qsTr('Inputs (%1)').arg(txdetails.inputs.length)
                         color: Material.accentColor
                     }
 
                     Repeater {
-                        model: txdetails.outputs
+                        model: inputs_label.collapsed
+                            ? undefined
+                            : txdetails.inputs
+                        delegate: TxInput {
+                            Layout.columnSpan: 2
+                            Layout.fillWidth: true
+
+                            idx: index
+                            model: modelData
+                        }
+                    }
+
+                    ToggleLabel {
+                        id: outputs_label
+                        Layout.columnSpan: 2
+                        Layout.topMargin: constants.paddingMedium
+
+                        labelText: qsTr('Outputs (%1)').arg(txdetails.outputs.length)
+                        color: Material.accentColor
+                    }
+
+                    Repeater {
+                        model: outputs_label.collapsed
+                            ? undefined
+                            : txdetails.outputs
                         delegate: TxOutput {
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
 
+                            idx: index
                             model: modelData
                         }
                     }
@@ -326,7 +386,20 @@ Pane {
                 icon.source: '../../icons/key.png'
                 text: qsTr('Sign')
                 visible: txdetails.canSign
-                onClicked: txdetails.sign()
+                onClicked: {
+                    if (txdetails.shouldConfirm) {
+                        var dialog = app.messageDialog.createObject(app, {
+                            text: qsTr('Confirm signing transaction despite warnings?'),
+                            yesno: true
+                        })
+                        dialog.accepted.connect(function() {
+                            txdetails.sign()
+                        })
+                        dialog.open()
+                    } else {
+                        txdetails.sign()
+                    }
+                }
             }
 
             FlatButton {
@@ -335,6 +408,7 @@ Pane {
                 icon.source: '../../icons/microphone.png'
                 text: qsTr('Broadcast')
                 visible: txdetails.canBroadcast
+                enabled: !txdetails.lockDelay
                 onClicked: txdetails.broadcast()
             }
 
@@ -348,9 +422,13 @@ Pane {
                     var msg = ''
                     if (txdetails.isComplete) {
                         if (!txdetails.isMined && !txdetails.mempoolDepth) // local
-                            // TODO: iff offline wallet?
-                            // TODO: or also if just temporarily offline?
-                            msg = qsTr('This transaction is complete. Please share it with an online device')
+                            if (txdetails.lockDelay) {
+                                msg = qsTr('This transaction is fully signed, but can only be broadcast after %1 blocks.').arg(txdetails.lockDelay)
+                            } else {
+                                // TODO: iff offline wallet?
+                                // TODO: or also if just temporarily offline?
+                                msg = qsTr('This transaction is fully signed, but has not been broadcast yet.')
+                            }
                     } else if (txdetails.wallet.isWatchOnly) {
                         msg = qsTr('This transaction should be signed. Present this QR code to the signing device')
                     } else if (txdetails.wallet.isMultisig && txdetails.wallet.walletType != '2fa') {
@@ -391,7 +469,7 @@ Pane {
         id: txdetails
         wallet: Daemon.currentWallet
         onLabelChanged: root.detailsChanged()
-        onConfirmRemoveLocalTx: {
+        onConfirmRemoveLocalTx: (message) => {
             var dialog = app.messageDialog.createObject(app, { text: message, yesno: true })
             dialog.accepted.connect(function() {
                 txdetails.removeLocalTx(true)
@@ -423,7 +501,11 @@ Pane {
         function onSaveTxError(txid, code, message) {
             if (txid != txdetails.txid)
                 return
-            var dialog = app.messageDialog.createObject(app, { text: message })
+            var dialog = app.messageDialog.createObject(app, {
+                title: qsTr('Error'),
+                iconSource: Qt.resolvedUrl('../../icons/warning.png'),
+                text: message
+            })
             dialog.open()
         }
         function onBroadcastSucceeded() {

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
+from PyQt6.QtCore import pyqtProperty, pyqtSignal, QObject
 
 from electrum.logging import get_logger
 from electrum import constants
@@ -84,6 +84,10 @@ class QENetwork(QObject, QtEventListener):
     def on_event_proxy_set(self, *args):
         self._logger.debug('proxy set')
         self.proxySet.emit()
+        self.proxyTorChanged.emit()
+
+    @event_listener
+    def on_event_tor_probed(self, *args):
         self.proxyTorChanged.emit()
 
     def _update_status(self):
@@ -173,12 +177,11 @@ class QENetwork(QObject, QtEventListener):
 
     @event_listener
     def on_event_unknown_channels(self, unknown):
-        if unknown == 0 and self._gossipUnknownChannels == 0: # TODO: backend sends a lot of unknown=0 events
+        if unknown == 0 and self._gossipUnknownChannels == 0:  # TODO: backend sends a lot of unknown=0 events
             return
         self._logger.debug(f'unknown channels {unknown}')
         self._gossipUnknownChannels = unknown
         self.gossipUpdated.emit()
-        #self.lightning_gossip_num_queries = unknown
 
     def on_gossip_setting_changed(self):
         if not self.network:
@@ -205,7 +208,8 @@ class QENetwork(QObject, QtEventListener):
         net_params = self.network.get_parameters()
         try:
             server = ServerAddr.from_str_with_inference(server)
-            if not server: raise Exception("failed to parse")
+            if not server:
+                raise Exception('failed to parse')
         except Exception:
             return
         net_params = net_params._replace(server=server, auto_connect=self._qeconfig.autoConnect)
@@ -215,7 +219,7 @@ class QENetwork(QObject, QtEventListener):
     def serverWithStatus(self):
         server = self._server
         if not self.network.is_connected():  # connecting or disconnected
-            return f"{server} (connecting...)"
+            return f'{server} (connecting...)'
         return server
 
     @pyqtProperty(str, notify=statusChanged)
@@ -244,7 +248,7 @@ class QENetwork(QObject, QtEventListener):
 
     @pyqtProperty(str, notify=dataChanged)
     def networkName(self):
-        return constants.net.__name__.replace('Bitcoin','')
+        return constants.net.__name__.replace('Bitcoin', '')
 
     @pyqtProperty('QVariantMap', notify=proxyChanged)
     def proxy(self):
@@ -263,7 +267,7 @@ class QENetwork(QObject, QtEventListener):
     proxyTorChanged = pyqtSignal()
     @pyqtProperty(bool, notify=proxyTorChanged)
     def isProxyTor(self):
-        return self.network.tor_proxy
+        return bool(self.network.is_proxy_tor)
 
     @pyqtProperty('QVariant', notify=feeHistogramUpdated)
     def feeHistogram(self):
@@ -275,7 +279,7 @@ class QENetwork(QObject, QtEventListener):
             'peers': self._gossipPeers,
             'unknown_channels': self._gossipUnknownChannels,
             'db_nodes': self._gossipDbNodes,
-            'db_channels': self._gossipDbChannels ,
+            'db_channels': self._gossipDbChannels,
             'db_policies': self._gossipDbPolicies
         }
 

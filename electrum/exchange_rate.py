@@ -17,7 +17,8 @@ from . import util
 from .bitcoin import COIN
 from .i18n import _
 from .util import (ThreadJob, make_dir, log_exceptions, OldTaskGroup,
-                   make_aiohttp_session, resource_path, EventListener, event_listener, to_decimal)
+                   make_aiohttp_session, resource_path, EventListener, event_listener, to_decimal,
+                   timestamp_to_datetime)
 from .util import NetworkRetryManager
 from .network import Network
 from .simple_config import SimpleConfig
@@ -85,7 +86,7 @@ class ExchangeBase(Logger):
             self._quotes = await self.get_rates(ccy)
             assert all(isinstance(rate, (Decimal, type(None))) for rate in self._quotes.values()), \
                 f"fx rate must be Decimal, got {self._quotes}"
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
             self.logger.info(f"failed fx quotes: {repr(e)}")
             self.on_quotes()
         except Exception as e:
@@ -121,7 +122,7 @@ class ExchangeBase(Logger):
             self.logger.info(f"requesting fx history for {ccy}")
             h = await self.request_history(ccy)
             self.logger.info(f"received fx history for {ccy}")
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
             self.logger.info(f"failed fx history: {repr(e)}")
             return
         except Exception as e:
@@ -195,7 +196,7 @@ class CoinGecko(ExchangeBase):
         history = await self.get_json('api.coingecko.com',
                                       '/api/v3/coins/globalboost/market_chart?vs_currency=%s&days=max' % ccy)
 
-        return dict([(datetime.utcfromtimestamp(h[0]/1000).strftime('%Y-%m-%d'), str(h[1]))
+        return dict([(timestamp_to_datetime(h[0]/1000, utc=True).strftime('%Y-%m-%d'), str(h[1]))
                      for h in history['prices']])
 
 
@@ -212,7 +213,7 @@ class CoinCodex(ExchangeBase):
         now = datetime.now().strftime("%Y-%m-%d")
         history = await self.get_json('coincodex.com',
                                       '/api/coincodex/get_coin_history/bsty/2012-07-22/%s/1' % now)
-        return dict([(datetime.utcfromtimestamp(h[0]).strftime('%Y-%m-%d'), to_decimal(h[1]))
+        return dict([(timestamp_to_datetime(h[0], utc=True).strftime('%Y-%m-%d'), to_decimal(h[1]))
                      for h in history['BSTY']])
 
 

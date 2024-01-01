@@ -1,6 +1,6 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.1
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
 
 import org.electrum 1.0
 
@@ -26,7 +26,7 @@ WizardComponent {
 
     ColumnLayout {
         width: parent.width
-
+        height: parent.height
         InfoTextArea {
             Layout.preferredWidth: parent.width
             text: qsTr('Enter a list of Bitcoin addresses (this will create a watching-only wallet), or a list of private keys.')
@@ -34,15 +34,21 @@ WizardComponent {
 
         RowLayout {
             Layout.topMargin: constants.paddingMedium
-            TextArea {
+            Layout.fillHeight: true
+
+            ElTextArea {
                 id: import_ta
                 Layout.fillWidth: true
-                Layout.minimumHeight: 80
-                focus: true
+                Layout.fillHeight: true
+                font.family: FixedFont
                 wrapMode: TextEdit.WrapAnywhere
                 onTextChanged: valid = verify(text)
                 inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
+                background: PaneInsetBackground {
+                    baseColor: constants.darkerDialogBackground
+                }
             }
+
             ColumnLayout {
                 Layout.alignment: Qt.AlignTop
                 ToolButton {
@@ -73,7 +79,7 @@ WizardComponent {
                         dialog.onFound.connect(function() {
                             if (verify(dialog.scanData)) {
                                 if (import_ta.text != '')
-                                    import_ta.text = import_ta.text + ',\n'
+                                    import_ta.text = import_ta.text + '\n'
                                 import_ta.text = import_ta.text + dialog.scanData
                             }
                             dialog.close()

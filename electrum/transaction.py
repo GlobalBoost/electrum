@@ -42,6 +42,7 @@ import copy
 
 from . import ecc, bitcoin, constants, segwit_addr, bip32
 from .bip32 import BIP32Node
+from .i18n import _
 from .util import profiler, to_bytes, bfh, chunks, is_hex_str, parse_max_spend
 from .bitcoin import (TYPE_ADDRESS, TYPE_SCRIPT, hash_160,
                       hash160_to_p2sh, hash160_to_p2pkh, hash_to_segwit_addr,
@@ -52,12 +53,14 @@ from .bitcoin import (TYPE_ADDRESS, TYPE_SCRIPT, hash_160,
 from .crypto import sha256d
 from .logging import get_logger
 from .util import ShortID, OldTaskGroup
+from .bitcoin import DummyAddress
 from .descriptor import Descriptor, MissingSolutionPiece, create_dummy_descriptor_from_address
 from .json_db import stored_in
 
 if TYPE_CHECKING:
     from .wallet import Abstract_Wallet
     from .network import Network
+    from .simple_config import SimpleConfig
 
 
 _logger = get_logger(__name__)
@@ -612,6 +615,16 @@ def check_scriptpubkey_template_and_dust(scriptpubkey, amount: Optional[int]):
     if amount < dust_limit:
         raise Exception(f'amount ({amount}) is below dust limit for scriptpubkey type ({dust_limit})')
 
+def merge_duplicate_tx_outputs(outputs: Iterable['PartialTxOutput']) -> List['PartialTxOutput']:
+    """Merges outputs that are paying to the same address by replacing them with a single larger output."""
+    output_dict = {}
+    for output in outputs:
+        assert isinstance(output.value, int), "tx outputs with spend-max-like str cannot be merged"
+        if output.scriptpubkey in output_dict:
+            output_dict[output.scriptpubkey].value += output.value
+        else:
+            output_dict[output.scriptpubkey] = copy.copy(output)
+    return list(output_dict.values())
 
 def match_script_against_template(script, template, debug=False) -> bool:
     """Returns whether 'script' matches 'template'."""
@@ -802,7 +815,7 @@ class Transaction:
         if is_segwit:
             marker = vds.read_bytes(1)
             if marker != b'\x01':
-                raise ValueError('invalid txn marker byte: {}'.format(marker))
+                raise SerializationError('invalid txn marker byte: {}'.format(marker))
             n_vin = vds.read_compact_size()
         if n_vin < 1:
             raise SerializationError('tx needs to have at least 1 input')
@@ -1154,6 +1167,22 @@ class Transaction:
     def get_output_idxs_from_address(self, addr: str) -> Set[int]:
         script = bitcoin.address_to_script(addr)
         return self.get_output_idxs_from_scriptpubkey(script)
+
+    def replace_output_address(self, old_address: str, new_address: str) -> None:
+        idx = list(self.get_output_idxs_from_address(old_address))
+        assert len(idx) == 1
+        amount = self._outputs[idx[0]].value
+        funding_output = PartialTxOutput.from_address_and_value(new_address, amount)
+        old_output = PartialTxOutput.from_address_and_value(old_address, amount)
+        self._outputs.remove(old_output)
+        self.add_outputs([funding_output])
+        delattr(self, '_script_to_output_idx')
+
+    def get_change_outputs(self):
+        return  [o for o in self._outputs if o.is_change]
+
+    def has_dummy_output(self, dummy_addr: str) -> bool:
+        return len(self.get_output_idxs_from_address(dummy_addr)) == 1
 
     def output_value_for_address(self, addr):
         # assumes exactly one output has that address
@@ -1991,7 +2020,7 @@ class PartialTransaction(Transaction):
             txout.combine_with_other_txout(other_txout)
         self.invalidate_ser_cache()
 
-    def join_with_other_psbt(self, other_tx: 'PartialTransaction') -> None:
+    def join_with_other_psbt(self, other_tx: 'PartialTransaction', *, config: 'SimpleConfig') -> None:
         """Adds inputs and outputs from other_tx into this one."""
         if not isinstance(other_tx, PartialTransaction):
             raise Exception('Can only join partial transactions.')
@@ -2008,7 +2037,7 @@ class PartialTransaction(Transaction):
         self._unknown.update(other_tx._unknown)
         # copy and add inputs and outputs
         self.add_inputs(list(other_tx.inputs()))
-        self.add_outputs(list(other_tx.outputs()))
+        self.add_outputs(list(other_tx.outputs()), merge_duplicates=config.WALLET_MERGE_DUPLICATE_OUTPUTS)
         self.remove_signatures()
         self.invalidate_ser_cache()
 
@@ -2023,8 +2052,10 @@ class PartialTransaction(Transaction):
         self.BIP69_sort(outputs=False)
         self.invalidate_ser_cache()
 
-    def add_outputs(self, outputs: List[PartialTxOutput]) -> None:
+    def add_outputs(self, outputs: List[PartialTxOutput], *, merge_duplicates: bool = False) -> None:
         self._outputs.extend(outputs)
+        if merge_duplicates:
+            self._outputs = merge_duplicate_tx_outputs(self._outputs)
         self.BIP69_sort(inputs=False)
         self.invalidate_ser_cache()
 

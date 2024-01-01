@@ -12,8 +12,7 @@ from PyQt5.QtWidgets import (QComboBox, QLabel, QVBoxLayout, QGridLayout, QLineE
 from electrum.bitcoin import is_address
 from electrum.i18n import _
 from electrum.util import InvoiceError
-from electrum.invoices import PR_DEFAULT_EXPIRATION_WHEN_CREATING
-from electrum.invoices import PR_EXPIRED, pr_expiration_values
+from electrum.invoices import pr_expiration_values
 from electrum.logging import Logger
 
 from .amountedit import AmountEdit, BTCAmountEdit, SizedFreezableLineEdit
@@ -146,13 +145,8 @@ class ReceiveTab(QWidget, MessageBoxMixin, Logger):
         self.update_view_button()
         self.toolbar.insertWidget(2, self.toggle_view_button)
         # menu
-        menu.addConfig(
-            _('Add on-chain fallback to lightning requests'), self.config.cv.WALLET_BOLT11_FALLBACK,
-            callback=self.on_toggle_bolt11_fallback)
-        menu.addConfig(
-            _('Add lightning requests to bitcoin URIs'), self.config.cv.WALLET_BIP21_LIGHTNING,
-            tooltip=_('This may result in large QR codes'),
-            callback=self.update_current_request)
+        menu.addConfig(self.config.cv.WALLET_BOLT11_FALLBACK, callback=self.on_toggle_bolt11_fallback)
+        menu.addConfig(self.config.cv.WALLET_BIP21_LIGHTNING, callback=self.update_current_request)
         self.qr_menu_action = menu.addToggle(_("Show detached QR code window"), self.window.toggle_qr_window)
         menu.addAction(_("Import requests"), self.window.import_requests)
         menu.addAction(_("Export requests"), self.window.export_requests)
@@ -182,7 +176,7 @@ class ReceiveTab(QWidget, MessageBoxMixin, Logger):
 
     def update_expiry_text(self):
         expiry = self.config.WALLET_PAYREQ_EXPIRY_SECONDS
-        text = pr_expiration_values[expiry]
+        text = pr_expiration_values()[expiry]
         self.expiry_button.setText(text)
 
     def expiry_dialog(self):
@@ -197,7 +191,7 @@ class ReceiveTab(QWidget, MessageBoxMixin, Logger):
             _('For Lightning requests, payments will not be accepted after the expiration.'),
         ])
         expiry = self.config.WALLET_PAYREQ_EXPIRY_SECONDS
-        v = self.window.query_choice(msg, pr_expiration_values, title=_('Expiry'), default_choice=expiry)
+        v = self.window.query_choice(msg, pr_expiration_values(), title=_('Expiry'), default_choice=expiry)
         if v is None:
             return
         self.config.WALLET_PAYREQ_EXPIRY_SECONDS = v
@@ -229,14 +223,14 @@ class ReceiveTab(QWidget, MessageBoxMixin, Logger):
 
     def on_tab_changed(self):
         text, data, help_text, title = self.get_tab_data()
-        self.window.do_copy(data, title=title)
+        self.window.do_copy(text, title=title)
         self.update_receive_qr_window()
 
     def do_copy(self, e):
         if e.button() != Qt.LeftButton:
             return
         text, data, help_text, title = self.get_tab_data()
-        self.window.do_copy(data, title=title)
+        self.window.do_copy(text, title=title)
 
     def toggle_receive_qr(self):
         b = not self.config.GUI_QT_RECEIVE_TAB_QR_VISIBLE

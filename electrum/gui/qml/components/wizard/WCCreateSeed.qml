@@ -1,6 +1,6 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.1
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
 
 import org.electrum 1.0
 
@@ -9,7 +9,7 @@ import "../controls"
 WizardComponent {
     securePage: true
 
-    valid: seedtext.text != ''
+    valid: seedtext.text != '' && extendcb.checked ? customwordstext.text != '' : true
 
     function apply() {
         wizard_data['seed'] = seedtext.text
@@ -53,6 +53,8 @@ WizardComponent {
 
             Label {
                 Layout.topMargin: constants.paddingMedium
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
                 text: qsTr('Your wallet generation seed is:')
             }
 
@@ -68,8 +70,9 @@ WizardComponent {
                 }
             }
 
-            CheckBox {
+            ElCheckBox {
                 id: extendcb
+                Layout.fillWidth: true
                 text: qsTr('Extend seed with custom words')
             }
 
@@ -78,6 +81,7 @@ WizardComponent {
                 visible: extendcb.checked
                 Layout.fillWidth: true
                 placeholderText: qsTr('Enter your custom word(s)')
+                inputMethodHints: Qt.ImhNoPredictiveText
             }
 
             Component.onCompleted : {

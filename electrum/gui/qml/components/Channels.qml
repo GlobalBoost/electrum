@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -136,12 +136,25 @@ Pane {
                 enabled: Daemon.currentWallet.confirmedBalance.satsInt > 0
                 text: qsTr('Open Channel')
                 onClicked: {
-                    var dialog = openChannelDialog.createObject(root)
-                    dialog.open()
+                    if (Daemon.currentWallet.channelModel.count == 0) {
+                        var txt = Daemon.currentWallet.channelModel.lightningWarningMessage() + '\n\n' +
+                            qsTr('Do you want to create your first channel?')
+                        var confirmdialog = app.messageDialog.createObject(root, {
+                            text: txt,
+                            yesno: true
+                        })
+                        confirmdialog.accepted.connect(function () {
+                            var dialog = openChannelDialog.createObject(root)
+                            dialog.open()
+                        })
+                        confirmdialog.open()
+                    } else {
+                        var dialog = openChannelDialog.createObject(root)
+                        dialog.open()
+                    }
                 }
                 icon.source: '../../icons/lightning.png'
             }
-
         }
 
     }
@@ -150,21 +163,6 @@ Pane {
         id: openChannelDialog
         OpenChannelDialog {
             onClosed: destroy()
-        }
-    }
-
-    Component {
-        id: importChannelBackupDialog
-        ImportChannelBackupDialog {
-            onClosed: destroy()
-        }
-    }
-
-    Connections {
-        target: Daemon.currentWallet
-        function onImportChannelBackupFailed(message) {
-            var dialog = app.messageDialog.createObject(root, { title: qsTr('Error'), text: message })
-            dialog.open()
         }
     }
 

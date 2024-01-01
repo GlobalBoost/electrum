@@ -94,16 +94,16 @@ if [[ $1 == "init" ]]; then
     $agent setconfig --offline server 127.0.0.1:51001:t
     $agent setconfig --offline lightning_to_self_delay 144
     $agent setconfig --offline test_force_disable_mpp True
-    # alice is funded, bob is listening
-    if [[ $2 == "bob" ]]; then
-        $bob setconfig --offline lightning_listen localhost:9735
-        $bob setconfig --offline use_swapserver true
-    fi
     echo "funding $2"
     # note: changing the funding amount affects all tests, as they rely on "wait_for_balance"
     $bitcoin_cli sendtoaddress $($agent getunusedaddress -o) 1
 fi
 
+if [[ $1 == "setconfig" ]]; then
+    # use this to set config vars that need to be set before the daemon is started
+    agent="./run_electrum --regtest -D /tmp/$2"
+    $agent setconfig --offline $3 $4
+fi
 
 # start daemons. Bob is started first because he is listening
 if [[ $1 == "start" ]]; then
@@ -127,7 +127,7 @@ if [[ $1 == "breach" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     request=$($bob add_request 0.01 -m "blah" | jq -r ".lightning_invoice")
@@ -152,13 +152,13 @@ if [[ $1 == "backup" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel1=$($alice open_channel $bob_node 0.15)
+    channel1=$($alice open_channel $bob_node 0.15 --password='')
     $alice setconfig use_recoverable_channels False
-    channel2=$($alice open_channel $bob_node 0.15)
+    channel2=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     backup=$($alice export_channel_backup $channel2)
-    seed=$($alice getseed)
+    seed=$($alice getseed --password='')
     $alice stop
     mv /tmp/alice/regtest/wallets/default_wallet /tmp/alice/regtest/wallets/default_wallet.old
     $alice -o restore "$seed"
@@ -179,14 +179,14 @@ if [[ $1 == "backup_local_forceclose" ]]; then
     echo "alice opens channel"
     bob_node=$($bob nodeid)
     $alice setconfig use_recoverable_channels False
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     backup=$($alice export_channel_backup $channel)
     echo "local force close $channel"
     $alice close_channel $channel --force
     sleep 0.5
-    seed=$($alice getseed)
+    seed=$($alice getseed --password='')
     $alice stop
     mv /tmp/alice/regtest/wallets/default_wallet /tmp/alice/regtest/wallets/default_wallet.old
     new_blocks 150
@@ -202,7 +202,7 @@ if [[ $1 == "collaborative_close" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     echo "alice closes channel"
@@ -214,7 +214,7 @@ if [[ $1 == "swapserver_success" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     echo "alice initiates swap"
@@ -234,7 +234,7 @@ if [[ $1 == "swapserver_refund" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     echo "alice initiates swap"
@@ -256,7 +256,7 @@ if [[ $1 == "extract_preimage" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    $alice open_channel $bob_node 0.15
+    $alice open_channel $bob_node 0.15 --password=''
     new_blocks 3
     wait_until_channel_open alice
     chan_id=$($alice list_channels | jq -r ".[0].channel_point")
@@ -287,7 +287,7 @@ if [[ $1 == "redeem_htlcs" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    $alice open_channel $bob_node 0.15
+    $alice open_channel $bob_node 0.15 --password=''
     new_blocks 3
     wait_until_channel_open alice
     # alice pays bob
@@ -329,7 +329,7 @@ if [[ $1 == "breach_with_unspent_htlc" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     echo "alice pays bob"
@@ -358,7 +358,7 @@ if [[ $1 == "breach_with_spent_htlc" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     new_blocks 3
     wait_until_channel_open alice
     echo "alice pays bob"
@@ -408,21 +408,11 @@ if [[ $1 == "breach_with_spent_htlc" ]]; then
     $bob getbalance
 fi
 
-
-if [[ $1 == "configure_test_watchtower" ]]; then
-    # carol is the watchtower of bob
-    $carol setconfig -o run_watchtower true
-    $carol setconfig -o watchtower_user wtuser
-    $carol setconfig -o watchtower_password wtpassword
-    $carol setconfig -o watchtower_port 12345
-    $bob setconfig -o watchtower_url http://wtuser:wtpassword@127.0.0.1:12345
-fi
-
 if [[ $1 == "watchtower" ]]; then
     wait_for_balance alice 1
     echo "alice opens channel"
     bob_node=$($bob nodeid)
-    channel=$($alice open_channel $bob_node 0.15)
+    channel=$($alice open_channel $bob_node 0.15 --password='')
     echo "channel outpoint: $channel"
     new_blocks 3
     wait_until_channel_open alice
@@ -448,6 +438,21 @@ if [[ $1 == "watchtower" ]]; then
     echo "alice breaches with old ctx:" $ctx_id
     echo "watchtower publishes justice transaction"
     wait_until_spent $ctx_id 1  # alice's to_local gets punished immediately
+fi
+
+if [[ $1 == "just_in_time" ]]; then
+    bob_node=$($bob nodeid)
+    $alice setconfig zeroconf_trusted_node $bob_node
+    $alice setconfig use_recoverable_channels false
+    wait_for_balance carol 1
+    echo "carol opens channel with bob"
+    $carol open_channel $bob_node 0.15 --password=''
+    new_blocks 3
+    wait_until_channel_open carol
+    echo "carol pays alice"
+    # note: set amount to 0.001 to test failure: 'payment too low'
+    invoice=$($alice add_request 0.01 -m "invoice" | jq -r ".lightning_invoice")
+    $carol lnpay $invoice
 fi
 
 if [[ $1 == "unixsockets" ]]; then

@@ -1,13 +1,15 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.1
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
+
 
 Item {
     id: root
 
+    property bool showAutoselectServer: true
     property alias auto_connect: auto_server_cb.checked
     property alias address: address_tf.text
 
@@ -22,26 +24,26 @@ Item {
 
         CheckBox {
             id: auto_server_cb
+            visible: showAutoselectServer
             text: qsTr('Select server automatically')
             checked: true
         }
 
-        GridLayout {
-            columns: 2
-            Layout.fillWidth: true
+        Label {
+            text: qsTr("Server")
+            enabled: address_tf.enabled
+        }
 
-            Label {
-                text: qsTr("Server")
-                enabled: address_tf.enabled
-            }
+        TextHighlightPane {
+            Layout.fillWidth: true
 
             TextField {
                 id: address_tf
                 enabled: !auto_server_cb.checked
-                Layout.fillWidth: true
+                width: parent.width
+                inputMethodHints: Qt.ImhNoPredictiveText
             }
         }
-
 
         ColumnLayout {
             Heading {

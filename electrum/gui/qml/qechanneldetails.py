@@ -1,12 +1,14 @@
 import threading
+from enum import IntEnum
 
-from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, Q_ENUMS
+from PyQt6.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject, pyqtEnum
 
 from electrum.i18n import _
 from electrum.gui import messages
 from electrum.logging import get_logger
 from electrum.lnutil import LOCAL, REMOTE
 from electrum.lnchannel import ChanCloseOption, ChannelState
+from electrum.util import format_short_id
 
 from .auth import AuthMixin, auth_protect
 from .qewallet import QEWallet
@@ -17,11 +19,10 @@ from .util import QtEventListener, event_listener
 class QEChannelDetails(AuthMixin, QObject, QtEventListener):
     _logger = get_logger(__name__)
 
-    class State: # subset, only ones we currently need in UI
+    @pyqtEnum
+    class State(IntEnum):  # subset, only ones we currently need in UI
         Closed = ChannelState.CLOSED
         Redeemed = ChannelState.REDEEMED
-
-    Q_ENUMS(State)
 
     channelChanged = pyqtSignal()
     channelCloseSuccess = pyqtSignal()
@@ -100,6 +101,16 @@ class QEChannelDetails(AuthMixin, QObject, QtEventListener):
         return self._channel.short_id_for_GUI()
 
     @pyqtProperty(str, notify=channelChanged)
+    def localScidAlias(self):
+        lsa = self._channel.get_local_scid_alias()
+        return format_short_id(lsa) if lsa else ''
+
+    @pyqtProperty(str, notify=channelChanged)
+    def remoteScidAlias(self):
+        rsa = self._channel.get_remote_scid_alias()
+        return format_short_id(rsa) if rsa else ''
+
+    @pyqtProperty(str, notify=channelChanged)
     def state(self):
         return self._channel.get_state_for_GUI()
 
@@ -112,6 +123,25 @@ class QEChannelDetails(AuthMixin, QObject, QtEventListener):
         if self._channel.is_backup():
             return ''
         return 'Local' if self._channel.constraints.is_initiator else 'Remote'
+
+    @pyqtProperty('QVariantMap', notify=channelChanged)
+    def fundingOutpoint(self):
+        outpoint = self._channel.funding_outpoint
+        return {
+            'txid': outpoint.txid,
+            'index': outpoint.output_index
+        }
+
+    @pyqtProperty(str, notify=channelChanged)
+    def closingTxid(self):
+        if not self._channel.is_closed():
+            return ''
+        item = self._channel.get_closing_height()
+        if item:
+            closing_txid, closing_height, timestamp = item
+            return closing_txid
+        else:
+            return ''
 
     @pyqtProperty(QEAmount, notify=channelChanged)
     def capacity(self):
@@ -160,15 +190,19 @@ class QEChannelDetails(AuthMixin, QObject, QtEventListener):
 
     @pyqtProperty(bool, notify=channelChanged)
     def canClose(self):
-        return self.canCoopClose or self.canForceClose
+        return self.canCoopClose or self.canLocalForceClose or self.canRequestForceClose
 
     @pyqtProperty(bool, notify=channelChanged)
     def canCoopClose(self):
         return ChanCloseOption.COOP_CLOSE in self._channel.get_close_options()
 
     @pyqtProperty(bool, notify=channelChanged)
-    def canForceClose(self):
-        return any([o in [ChanCloseOption.LOCAL_FCLOSE, ChanCloseOption.REQUEST_REMOTE_FCLOSE] for o in self._channel.get_close_options()])
+    def canLocalForceClose(self):
+        return ChanCloseOption.LOCAL_FCLOSE in self._channel.get_close_options()
+
+    @pyqtProperty(bool, notify=channelChanged)
+    def canRequestForceClose(self):
+        return ChanCloseOption.REQUEST_REMOTE_FCLOSE in self._channel.get_close_options()
 
     @pyqtProperty(bool, notify=channelChanged)
     def canDelete(self):
@@ -234,6 +268,18 @@ class QEChannelDetails(AuthMixin, QObject, QtEventListener):
     def do_close_channel(self, closetype):
         channel_id = self._channel.channel_id
 
+        def handle_result(success: bool, msg: str = ''):
+            try:
+                if success:
+                    self.channelCloseSuccess.emit()
+                else:
+                    self.channelCloseFailed.emit(msg)
+
+                self._is_closing = False
+                self.isClosingChanged.emit()
+            except RuntimeError:  # QEChannelDetails might be deleted at this point if the user closed the dialog.
+                pass
+
         def do_close():
             try:
                 self._is_closing = True
@@ -245,13 +291,10 @@ class QEChannelDetails(AuthMixin, QObject, QtEventListener):
                 else:
                     self._wallet.wallet.network.run_from_another_thread(self._wallet.wallet.lnworker.close_channel(channel_id))
                 self._logger.debug('Channel close successful')
-                self.channelCloseSuccess.emit()
+                handle_result(True)
             except Exception as e:
                 self._logger.exception("Could not close channel: " + repr(e))
-                self.channelCloseFailed.emit(_('Could not close channel: ') + repr(e))
-            finally:
-                self._is_closing = False
-                self.isClosingChanged.emit()
+                handle_result(False, _('Could not close channel: ') + repr(e))
 
         threading.Thread(target=do_close, daemon=True).start()
 

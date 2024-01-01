@@ -3,12 +3,13 @@ from concurrent.futures import CancelledError
 from asyncio.exceptions import TimeoutError
 from typing import TYPE_CHECKING, Optional
 
-from PyQt5.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
+from PyQt6.QtCore import pyqtProperty, pyqtSignal, pyqtSlot, QObject
 
 from electrum.i18n import _
 from electrum.gui import messages
 from electrum.util import bfh
-from electrum.lnutil import extract_nodeid, ln_dummy_address, ConnStringFormatError
+from electrum.lnutil import extract_nodeid, ConnStringFormatError
+from electrum.bitcoin import DummyAddress
 from electrum.lnworker import hardcoded_trampoline_nodes
 from electrum.logging import get_logger
 
@@ -26,9 +27,10 @@ class QEChannelOpener(QObject, AuthMixin):
     conflictingBackup = pyqtSignal([str], arguments=['message'])
     channelOpening = pyqtSignal([str], arguments=['peer'])
     channelOpenError = pyqtSignal([str], arguments=['message'])
-    channelOpenSuccess = pyqtSignal([str,bool,int,bool], arguments=['cid','has_onchain_backup','min_depth','tx_complete'])
+    channelOpenSuccess = pyqtSignal([str, bool, int, bool],
+                                    arguments=['cid', 'has_onchain_backup', 'min_depth', 'tx_complete'])
 
-    dataChanged = pyqtSignal() # generic notify signal
+    dataChanged = pyqtSignal()  # generic notify signal
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,6 +41,10 @@ class QEChannelOpener(QObject, AuthMixin):
         self._valid = False
         self._opentx = None
         self._txdetails = None
+
+        self._finalizer = None
+        self._node_pubkey = None
+        self._connect_str_resolved = None
 
     walletChanged = pyqtSignal()
     @pyqtProperty(QEWallet, notify=walletChanged)
@@ -123,7 +129,7 @@ class QEChannelOpener(QObject, AuthMixin):
             self.validChanged.emit()
             return
 
-        self._logger.debug('amount=%s' % str(self._amount))
+        self._logger.debug(f'amount={self._amount}')
         if not self._amount or not (self._amount.satsInt > 0 or self._amount.isMax):
             self._valid = False
             self.validChanged.emit()
@@ -135,9 +141,9 @@ class QEChannelOpener(QObject, AuthMixin):
     @pyqtSlot(str, result=bool)
     def validateConnectString(self, connect_str):
         try:
-            node_id, rest = extract_nodeid(connect_str)
+            extract_nodeid(connect_str)
         except ConnStringFormatError as e:
-            self._logger.debug(f"invalid connect_str. {e!r}")
+            self._logger.debug(f'invalid connect_str. {e!r}')
             return False
         return True
 
@@ -181,7 +187,7 @@ class QEChannelOpener(QObject, AuthMixin):
         """
         self._logger.debug('opening channel')
         # read funding_sat from tx; converts '!' to int value
-        funding_sat = funding_tx.output_value_for_address(ln_dummy_address())
+        funding_sat = funding_tx.output_value_for_address(DummyAddress.CHANNEL)
         lnworker = self._wallet.wallet.lnworker
 
         def open_thread():
@@ -198,13 +204,13 @@ class QEChannelOpener(QObject, AuthMixin):
                                              chan.constraints.funding_txn_minimum_depth, funding_tx.is_complete())
 
                 # TODO: handle incomplete TX
-                #if not funding_tx.is_complete():
-                    #self._txdetails = QETxDetails(self)
-                    #self._txdetails.rawTx = funding_tx
-                    #self._txdetails.wallet = self._wallet
-                    #self.txDetailsChanged.emit()
+                # if not funding_tx.is_complete():
+                #     self._txdetails = QETxDetails(self)
+                #     self._txdetails.rawTx = funding_tx
+                #     self._txdetails.wallet = self._wallet
+                #     self.txDetailsChanged.emit()
 
-            except (CancelledError,TimeoutError):
+            except (CancelledError, TimeoutError):
                 error = _('Could not connect to channel peer')
             except Exception as e:
                 error = str(e)
@@ -214,7 +220,6 @@ class QEChannelOpener(QObject, AuthMixin):
                 if error:
                     self._logger.exception("Problem opening channel: %s", error)
                     self.channelOpenError.emit(error)
-
 
         self._logger.debug('starting open thread')
         self.channelOpening.emit(conn_str)

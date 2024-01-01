@@ -116,7 +116,7 @@ _logger = get_logger(__name__)
 
 
 # get password routine
-def prompt_password(prompt, confirm=True):
+def prompt_password(prompt: str, *, confirm: bool = True) -> Optional[str]:
     import getpass
     password = getpass.getpass(prompt, stream=None)
     if password and confirm:
@@ -128,7 +128,7 @@ def prompt_password(prompt, confirm=True):
     return password
 
 
-def init_cmdline(config_options, wallet_path, server, *, config: 'SimpleConfig'):
+def init_cmdline(config_options, wallet_path, *, rpcserver: bool, config: 'SimpleConfig'):
     cmdname = config.get('cmd')
     cmd = known_commands[cmdname]
 
@@ -152,27 +152,20 @@ def init_cmdline(config_options, wallet_path, server, *, config: 'SimpleConfig')
         print_stderr("Exposing a single private key can compromise your entire wallet!")
         print_stderr("In particular, DO NOT use 'redeem private key' services proposed by third parties.")
 
-    # will we need a password
-    if not storage.is_encrypted():
-        db = WalletDB(storage.read(), manual_upgrades=False)
-        use_encryption = db.get('use_encryption')
-    else:
-        use_encryption = True
-
     # commands needing password
-    if ((cmd.requires_wallet and storage.is_encrypted() and server is False)\
-       or (cmdname == 'load_wallet' and storage.is_encrypted())\
-       or (cmd.requires_password and use_encryption)):
+    if ((cmd.requires_wallet and storage.is_encrypted() and not rpcserver)
+            or (cmdname == 'load_wallet' and storage.is_encrypted())
+            or (cmdname in ['password', 'unlock'])
+            or (cmd.requires_password and not rpcserver)):
         if storage.is_encrypted_with_hw_device():
             # this case is handled later in the control flow
             password = None
-        elif config.get('password'):
+        elif config.get('password') is not None:
             password = config.get('password')
+            if password == '':
+                password = None
         else:
-            password = prompt_password('Password:', False)
-            if not password:
-                print_msg("Error: Password required")
-                sys_exit(1)
+            password = prompt_password('Password:', confirm=False)
     else:
         password = None
 
@@ -234,8 +227,8 @@ async def run_offline_command(config, config_options, plugins: 'Plugins'):
                 password = get_password_for_hw_device_encrypted_storage(plugins)
                 config_options['password'] = password
             storage.decrypt(password)
-        db = WalletDB(storage.read(), manual_upgrades=False)
-        wallet = Wallet(db, storage, config=config)
+        db = WalletDB(storage.read(), storage=storage, upgrade=True)
+        wallet = Wallet(db, config=config)
         config_options['wallet'] = wallet
     else:
         wallet = None
@@ -317,7 +310,7 @@ def main():
         elif arg == '?':
             sys.argv[i] = input("Enter argument:")
         elif arg == ':':
-            sys.argv[i] = prompt_password('Enter argument (will not echo):', False)
+            sys.argv[i] = prompt_password('Enter argument (will not echo):', confirm=False)
 
     # parse command line
     parser = get_parser()
@@ -326,11 +319,10 @@ def main():
     # config is an object passed to the various constructors (wallet, interface, gui)
     if is_android:
         import importlib.util
-        android_gui = 'kivy' if importlib.util.find_spec('kivy') else 'qml'
         config_options = {
             'verbosity': '*' if util.is_android_debug_apk() else '',
             'cmd': 'gui',
-            SimpleConfig.GUI_NAME.key(): android_gui,
+            SimpleConfig.GUI_NAME.key(): 'qml',
             SimpleConfig.WALLET_USE_SINGLE_PASSWORD.key(): True,
         }
         if util.get_android_package_name() == "org.electrum.testnet.electrum":
@@ -459,10 +451,9 @@ def handle_cmd(*, cmdname: str, config: 'SimpleConfig', config_options: dict):
         configure_logging(config)
         fd = daemon.get_file_descriptor(config)
         if fd is not None:
-            plugins = init_plugins(config, config.GUI_NAME)
             d = daemon.Daemon(config, fd, start_network=False)
             try:
-                d.run_gui(config, plugins)
+                d.run_gui()
             except BaseException as e:
                 _logger.exception('daemon.run_gui errored')
                 sys_exit(1)
@@ -477,7 +468,6 @@ def handle_cmd(*, cmdname: str, config: 'SimpleConfig', config_options: dict):
         fd = daemon.get_file_descriptor(config)
         if fd is not None:
             # run daemon
-            init_plugins(config, 'cmdline')
             d = daemon.Daemon(config, fd)
             d.run_daemon()
             sys_exit(0)
@@ -491,7 +481,7 @@ def handle_cmd(*, cmdname: str, config: 'SimpleConfig', config_options: dict):
         cmd = known_commands[cmdname]
         wallet_path = config.get_wallet_path()
         if not config.NETWORK_OFFLINE:
-            init_cmdline(config_options, wallet_path, True, config=config)
+            init_cmdline(config_options, wallet_path, rpcserver=True, config=config)
             timeout = config.CLI_TIMEOUT
             try:
                 result = daemon.request(config, 'run_cmdline', (config_options,), timeout)
@@ -512,12 +502,22 @@ def handle_cmd(*, cmdname: str, config: 'SimpleConfig', config_options: dict):
             if cmd.requires_network:
                 print_msg("This command cannot be run offline")
                 sys_exit(1)
-            init_cmdline(config_options, wallet_path, False, config=config)
+            lockfile = daemon.get_lockfile(config)
+            if os.path.exists(lockfile):
+                print_stderr("Daemon already running (lockfile detected)")
+                print_stderr("Run 'electrum stop' to stop the daemon.")
+                print_stderr("Run this command without --offline to interact with the daemon")
+                sys_exit(1)
+            init_cmdline(config_options, wallet_path, rpcserver=False, config=config)
             plugins = init_plugins(config, 'cmdline')
             coro = run_offline_command(config, config_options, plugins)
             fut = asyncio.run_coroutine_threadsafe(coro, loop)
             try:
-                result = fut.result()
+                try:
+                    result = fut.result()
+                finally:
+                    plugins.stop()
+                    plugins.stopped_event.wait(1)
             except Exception as e:
                 print_stderr(str(e) or repr(e))
                 sys_exit(1)

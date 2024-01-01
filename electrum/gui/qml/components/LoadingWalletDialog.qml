@@ -1,7 +1,7 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
 import org.electrum 1.0
 
@@ -19,6 +19,10 @@ ElDialog {
     y: Math.floor((parent.height - implicitHeight) / 2)
     // anchors.centerIn: parent // this strangely pixelates the spinner
 
+    function open() {
+        showTimer.start()
+    }
+
     ColumnLayout {
         width: parent.width
 
@@ -32,8 +36,18 @@ ElDialog {
     Connections {
         target: Daemon
         function onLoadingChanged() {
-            if (!Daemon.loading)
+            console.log('daemon loading ' + Daemon.loading)
+            if (!Daemon.loading) {
+                showTimer.stop()
                 dialog.close()
+            }
         }
+    }
+
+    Timer {
+        id: showTimer
+        interval: 250
+        repeat: false
+        onTriggered: dialog.visible = true
     }
 }

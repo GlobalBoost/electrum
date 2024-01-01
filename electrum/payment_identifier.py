@@ -48,6 +48,7 @@ def is_uri(data: str) -> bool:
 RE_ALIAS = r'(.*?)\s*\<([0-9A-Za-z]{1,})\>'
 RE_EMAIL = r'\b[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Z|a-z]{2,7}\b'
 RE_DOMAIN = r'\b([A-Za-z0-9-]+\.)+[A-Z|a-z]{2,7}\b'
+RE_SCRIPT_FN = r'script\((.*)\)'
 
 
 class PaymentIdentifierState(IntEnum):
@@ -63,7 +64,7 @@ class PaymentIdentifierState(IntEnum):
                          # and supply a refund address (bip70)
     MERCHANT_ACK    = 6  # PI notified merchant. nothing to be done.
     ERROR           = 50 # generic error
-    NOT_FOUND       = 51 # PI contains a recognized destination format, but resolve step was unsuccesful
+    NOT_FOUND       = 51 # PI contains a recognized destination format, but resolve step was unsuccessful
     MERCHANT_ERROR  = 52 # PI failed notifying the merchant after broadcasting onchain TX
     INVALID_AMOUNT  = 53 # Specified amount not accepted
 
@@ -117,9 +118,10 @@ class PaymentIdentifier(Logger):
         # more than one of those may be set
         self.multiline_outputs = None
         self._is_max = False
-        self.bolt11 = None
+        self.bolt11 = None  # type: Optional[Invoice]
         self.bip21 = None
         self.spk = None
+        self.spk_is_address = False
         #
         self.emaillike = None
         self.domainlike = None
@@ -171,6 +173,8 @@ class PaymentIdentifier(Logger):
             return True
         if self._type in [PaymentIdentifierType.LNURLP, PaymentIdentifierType.BOLT11, PaymentIdentifierType.LNADDR]:
             return bool(self.bolt11) and bool(self.bolt11.get_address())
+        if self._type == PaymentIdentifierType.BIP21:
+            return bool(self.bip21.get('address', None)) or (bool(self.bolt11) and bool(self.bolt11.get_address()))
 
     def is_multiline(self):
         return bool(self.multiline_outputs)
@@ -255,12 +259,19 @@ class PaymentIdentifier(Logger):
                 if bolt11:
                     try:
                         self.bolt11 = Invoice.from_bech32(bolt11)
+                        # carry BIP21 onchain address in Invoice.outputs in case bolt11 doesn't contain a fallback
+                        # address but the BIP21 URI has one.
+                        if bip21_address := self.bip21.get('address'):
+                            amount = self.bip21.get('amount', 0)
+                            self.bolt11.outputs = [PartialTxOutput.from_address_and_value(bip21_address, amount)]
                     except InvoiceError as e:
                         self.logger.debug(self._get_error_from_invoiceerror(e))
                 self.set_state(PaymentIdentifierState.AVAILABLE)
-        elif scriptpubkey := self.parse_output(text):
+        elif self.parse_output(text)[0]:
+            scriptpubkey, is_address = self.parse_output(text)
             self._type = PaymentIdentifierType.SPK
             self.spk = scriptpubkey
+            self.spk_is_address = is_address
             self.set_state(PaymentIdentifierState.AVAILABLE)
         elif self.contacts and (contact := self.contacts.by_name(text)):
             if contact['type'] == 'address':
@@ -297,14 +308,12 @@ class PaymentIdentifier(Logger):
         try:
             if self.emaillike or self.domainlike:
                 # TODO: parallel lookup?
-                data = await self.resolve_openalias()
+                key = self.emaillike if self.emaillike else self.domainlike
+                data = await self.resolve_openalias(key)
                 if data:
                     self.openalias_data = data
                     self.logger.debug(f'OA: {data!r}')
-                    name = data.get('name')
                     address = data.get('address')
-                    key = self.emaillike if self.emaillike else self.domainlike
-                    self.contacts[key] = ('openalias', name)
                     if not data.get('validated'):
                         self.warning = _(
                             'WARNING: the alias "{}" could not be validated via an additional '
@@ -383,8 +392,8 @@ class PaymentIdentifier(Logger):
                 raise Exception("Unexpected missing LNURL data")
 
             if not (self.lnurl_data.min_sendable_sat <= amount_sat <= self.lnurl_data.max_sendable_sat):
-                self.error = _('Amount must be between %d and %d sat.') \
-                    % (self.lnurl_data.min_sendable_sat, self.lnurl_data.max_sendable_sat)
+                self.error = _('Amount must be between {} and {} sat.').format(
+                    self.lnurl_data.min_sendable_sat, self.lnurl_data.max_sendable_sat)
                 self.set_state(PaymentIdentifierState.INVALID_AMOUNT)
                 return
 
@@ -406,7 +415,7 @@ class PaymentIdentifier(Logger):
             if invoice.get_amount_sat() != amount_sat:
                 raise Exception("lnurl returned invoice with wrong amount")
             # this will change what is returned by get_fields_for_GUI
-            self.bolt11 = bolt11_invoice
+            self.bolt11 = invoice
             self.set_state(PaymentIdentifierState.AVAILABLE)
         except Exception as e:
             self.error = str(e)
@@ -464,7 +473,8 @@ class PaymentIdentifier(Logger):
             return [PartialTxOutput(scriptpubkey=self.spk, value=amount)]
         elif self.bip21:
             address = self.bip21.get('address')
-            scriptpubkey = self.parse_output(address)
+            scriptpubkey, is_address = self.parse_output(address)
+            assert is_address  # unlikely, but make sure it is an address, not a script
             return [PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)]
         else:
             raise Exception('not onchain')
@@ -499,25 +509,26 @@ class PaymentIdentifier(Logger):
             x, y = line.split(',')
         except ValueError:
             raise Exception("expected two comma-separated values: (address, amount)") from None
-        scriptpubkey = self.parse_output(x)
+        scriptpubkey, is_address = self.parse_output(x)
         if not scriptpubkey:
             raise Exception('Invalid address')
         amount = self.parse_amount(y)
         return PartialTxOutput(scriptpubkey=scriptpubkey, value=amount)
 
-    def parse_output(self, x: str) -> bytes:
+    def parse_output(self, x: str) -> Tuple[bytes, bool]:
         try:
             address = self.parse_address(x)
-            return bytes.fromhex(bitcoin.address_to_script(address))
+            return bytes.fromhex(bitcoin.address_to_script(address)), True
         except Exception as e:
             pass
         try:
-            script = self.parse_script(x)
-            return bytes.fromhex(script)
+            m = re.match('^' + RE_SCRIPT_FN + '$', x)
+            script = self.parse_script(str(m.group(1)))
+            return bytes.fromhex(script), False
         except Exception as e:
             pass
 
-        # raise Exception("Invalid address or script.")
+        return None, False
 
     def parse_script(self, x: str):
         script = ''
@@ -633,8 +644,7 @@ class PaymentIdentifier(Logger):
         amount = lnaddr.get_amount_sat()
         return pubkey, amount, description
 
-    async def resolve_openalias(self) -> Optional[dict]:
-        key = self.emaillike if self.emaillike else self.domainlike
+    async def resolve_openalias(self, key: str) -> Optional[dict]:
         # TODO: below check needed? we already matched RE_EMAIL/RE_DOMAIN
         # if not (('.' in key) and ('<' not in key) and (' ' not in key)):
         #     return None
@@ -674,7 +684,7 @@ def invoice_from_payment_identifier(
         if not invoice:
             return
         if invoice.amount_msat is None:
-            invoice.amount_msat = int(amount_sat * 1000)
+            invoice.set_amount_msat(int(amount_sat * 1000))
         return invoice
     else:
         outputs = pi.get_onchain_outputs(amount_sat)

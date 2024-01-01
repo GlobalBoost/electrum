@@ -1,9 +1,9 @@
-import QtQuick 2.6
-import QtQuick.Layouts 1.0
-import QtQuick.Controls 2.3
-import QtQuick.Controls.Material 2.0
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 
-import QtQml 2.6
+import QtQml
 
 import "controls"
 
@@ -142,6 +142,8 @@ ElDialog
         function onSendingBugreportFailure(text) {
             _sending = false
             var dialog = app.messageDialog.createObject(app, {
+                title: qsTr('Error'),
+                iconSource: Qt.resolvedUrl('../../icons/warning.png'),
                 text: text,
                 richText: true
             })
